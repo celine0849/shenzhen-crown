@@ -329,24 +329,45 @@
 
   // ============ 渲染函数 ============
   async function renderHomeChampion() {
-    const { champion } = await aggregate();
+    paintHomeChampion(null);
+    aggregate()
+      .then((data) => paintHomeChampion(data && data.champion))
+      .catch((e) => console.warn("[renderHomeChampion] 冠军拉取失败:", e && e.message));
+  }
+
+  function paintHomeChampion(champion) {
     $("#homeChampion").innerHTML = champion && champion.power > 0
       ? `<div>${teamAvatar(teamMeta.get(champion.team))}<span>当前冠军席位</span><strong>👑 ${champion.team}</strong><span>占领 ${champion.occupied}/5 个战场｜总战力 ${champion.power}</span></div><b>${champion.occupied}</b>`
       : `<div><span>当前冠军席位</span><strong>等待开球</strong><span>完成首局挑战后，战况将在这里点亮。</span></div><b>0</b>`;
   }
 
   async function renderChoices() {
-    const { teamStats, battleStats } = await aggregate();
-    const teamRank = new Map(teamStats.map((team, index) => [team.team, { ...team, rank: index + 1 }]));
+    // ① 先同步渲染（静态战队/战场数据，绝不被网络请求阻塞）
+    paintChoices(null);
+    // ② 异步拉取最新战况，成功后再刷新（失败也不影响战队显示）
+    aggregate()
+      .then((data) => paintChoices(data))
+      .catch((e) => console.warn("[renderChoices] 战况拉取失败，已用静态数据展示:", e && e.message));
+  }
+
+  // 同步绘制战队/战场选择；data 为 null 时用静态占位数据
+  function paintChoices(data) {
+    const teamRank = data && data.teamStats
+      ? new Map(data.teamStats.map((team, index) => [team.team, { ...team, rank: index + 1 }]))
+      : null;
     $("#teamChoices").innerHTML = teams.map((team, index) => {
-      const stat = teamRank.get(team.name) || { rank: index + 1, power: 0 };
+      const stat = (teamRank && teamRank.get(team.name)) || { rank: index + 1, power: 0 };
       return `<button type="button" class="team-card" data-value="${team.name}">${teamAvatar(team)}<h3>${team.name}</h3><p><span>当前排名</span><strong>No.${stat.rank}</strong></p><p><span>当前总战力</span><strong>${stat.power}</strong></p></button>`;
     }).join("");
+    const battleStats = (data && data.battleStats) || battles.map(([name]) => ({
+      battle: name, rows: [], leader: { team: "暂无", sprint: 0, guard: 0, power: 0 },
+      second: { team: "暂无", power: 0 }, gap: 0, tag: "🔥 激烈争夺中",
+    }));
     $("#battleChoices").innerHTML = battleStats.map((stat) => battleCard(stat)).join("");
     selectValue($("#teamChoices"), state.profile.team);
     selectValue($("#battleChoices"), state.profile.battle);
     selectValue($("#tacticChoices"), state.profile.tactic);
-    $("#playerName").value = state.profile.name || $("#playerName").value || "";
+    const nameEl = $("#playerName"); if (nameEl) nameEl.value = state.profile.name || nameEl.value || "";
     updateTeamCallout();
   }
 
