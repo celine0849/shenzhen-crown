@@ -336,9 +336,10 @@
   }
 
   function paintHomeChampion(champion) {
-    $("#homeChampion").innerHTML = champion && champion.power > 0
+    const hasChamp = champion && champion.power > 0;
+    $("#homeChampion").innerHTML = hasChamp
       ? `<div>${teamAvatar(teamMeta.get(champion.team))}<span>当前冠军席位</span><strong>👑 ${champion.team}</strong><span>占领 ${champion.occupied}/5 个战场｜总战力 ${champion.power}</span></div><b>${champion.occupied}</b>`
-      : `<div><span>当前冠军席位</span><strong>等待开球</strong><span>完成首局挑战后，战况将在这里点亮。</span></div><b>0</b>`;
+      : (champion === null ? `<div><span>当前冠军席位</span><strong>加载中...</strong><span>正在拉取最新战况</span></div><b>0</b>` : `<div><span>当前冠军席位</span><strong>等待开球</strong><span>完成首局挑战后，战况将在这里点亮。</span></div><b>0</b>`);
   }
 
   async function renderChoices() {
@@ -346,18 +347,25 @@
     paintChoices(null);
     // ② 异步拉取最新战况，成功后再刷新（失败也不影响战队显示）
     aggregate()
-      .then((data) => paintChoices(data))
+      .then((data) => {
+        console.log("[renderChoices] 战况已刷新, teamStats:", data?.teamStats?.length, "队, champion:", data?.champion?.team, data?.champion?.power);
+        paintChoices(data);
+      })
       .catch((e) => console.warn("[renderChoices] 战况拉取失败，已用静态数据展示:", e && e.message));
   }
 
-  // 同步绘制战队/战场选择；data 为 null 时用静态占位数据
+  // 同步绘制战队/战场选择；data 为 null 时用占位符（异步数据回来后自动刷新）
   function paintChoices(data) {
-    const teamRank = data && data.teamStats
+    const hasData = data && data.teamStats && data.teamStats.length > 0;
+    const teamRank = hasData
       ? new Map(data.teamStats.map((team, index) => [team.team, { ...team, rank: index + 1 }]))
       : null;
+    const loading = !hasData; // 数据还在加载中
     $("#teamChoices").innerHTML = teams.map((team, index) => {
       const stat = (teamRank && teamRank.get(team.name)) || { rank: index + 1, power: 0 };
-      return `<button type="button" class="team-card" data-value="${team.name}">${teamAvatar(team)}<h3>${team.name}</h3><p><span>当前排名</span><strong>No.${stat.rank}</strong></p><p><span>当前总战力</span><strong>${stat.power}</strong></p></button>`;
+      const powerText = loading ? "<em>···</em>" : stat.power;
+      const rankText = loading ? "<em>···</em>" : `No.${stat.rank}`;
+      return `<button type="button" class="team-card" data-value="${team.name}">${teamAvatar(team)}<h3>${team.name}</h3><p><span>当前排名</span><strong>${rankText}</strong></p><p><span>当前总战力</span><strong>${powerText}</strong></p></button>`;
     }).join("");
     const battleStats = (data && data.battleStats) || battles.map(([name]) => ({
       battle: name, rows: [], leader: { team: "暂无", sprint: 0, guard: 0, power: 0 },
