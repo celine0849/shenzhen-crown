@@ -389,10 +389,16 @@
   function updateTeamCallout() { $("#teamCallout").innerHTML = `<span>你已加入</span><strong>【${state.profile.team}】</strong><span>下半场开球，准备进入战场。</span>`; }
   function updateTacticScreen() { $("#tacticBattleName").textContent = `当前战场：${state.profile.battle}`; selectValue($("#tacticChoices"), state.profile.tactic); }
 
-  async function updateQuotaNote() {
+  function updateQuotaNote() {
     const name = $("#playerName").value.trim() || state.profile.name;
     const now = new Date(); let remaining = DAILY_LIMIT;
-    if (name) { const status = await fetchPlayerToday(); remaining = status.remainingAttempts; }
+    // 先用默认值立即显示，不卡网络
+    paintQuotaNote(name, now, remaining);
+    // 异步拉取真实剩余次数
+    if (name) { fetchPlayerToday().then((status) => { paintQuotaNote(name, now, status.remainingAttempts); }).catch(() => {}); }
+  }
+
+  function paintQuotaNote(name, now, remaining) {
     const status = now < ACTIVITY_START ? "活动未开始，可先体验流程" : now > ACTIVITY_END ? "活动已结束，可查看战报" : `今日剩余 ${remaining} 次挑战机会`;
     $("#quotaNote").textContent = status; $("#enterGameBtn").disabled = Boolean(name && remaining <= 0);
   }
@@ -409,8 +415,10 @@
 
   async function beginGame() {
     state.score = 0; state.combo = 0; state.maxCombo = 0; state.lastComboSfx = 0; state.rushSfxPlayed = false;
-    const snapshot = await aggregate();
-    state.beforeBattle = snapshot.battleStats.find((battle) => battle.battle === state.profile.battle);
+    // 异步拉取战况快照，不阻塞游戏启动
+    aggregate()
+      .then((snapshot) => { state.beforeBattle = (snapshot && snapshot.battleStats) ? snapshot.battleStats.find((battle) => battle.battle === state.profile.battle) : null; })
+      .catch(() => {});
     $("#scoreNow").textContent = "0"; $("#comboNow").textContent = "0"; $("#timeLeft").textContent = "60";
     $("#arena").classList.remove("combo-rush", "final-rush"); $("#injecting").classList.remove("show");
     $("#arena").querySelectorAll(".target,.floating-score,.hit-ring").forEach((node) => node.remove());
@@ -460,8 +468,12 @@
     if (!state.running) return; state.running = false; clearGameTimers(); $("#arena").querySelectorAll(".target").forEach((node) => node.remove()); $("#injecting").classList.add("show");
     const submitResult = USE_MOCK ? mockSubmit({ name: state.profile.name, team: state.profile.team, battle: state.profile.battle, tactic: state.profile.tactic, score: state.score, maxCombo: state.maxCombo, deviceId }) : await sbSubmitScore({ name: state.profile.name, team: state.profile.team, battle: state.profile.battle, tactic: state.profile.tactic, score: state.score, maxCombo: state.maxCombo });
     const accepted = submitResult.success; const count = accepted ? submitResult.data.todayAttempts : state.todayCache.attempts + 1; const todayBest = accepted ? submitResult.data.todayBest : state.todayCache.best;
-    const afterData = await aggregate(); const afterBattle = afterData.battleStats.find((battle) => battle.battle === state.profile.battle);
-    renderResult(count, todayBest, afterBattle, !accepted ? submitResult.message : null);
+    // 先用静态数据立即显示结果，不卡在 aggregate()
+    renderResult(count, todayBest, null, !accepted ? submitResult.message : null);
+    // 异步拉取最新战况刷新结果页（可选优化）
+    aggregate()
+      .then((afterData) => { const afterBattle = (afterData && afterData.battleStats) ? afterData.battleStats.find((battle) => battle.battle === state.profile.battle) : null; renderResult(count, todayBest, afterBattle, null); })
+      .catch(() => {});
   }
 
   function renderResult(count, todayBest, afterBattle, errorMsg) {
@@ -481,7 +493,23 @@
   }
 
   async function renderReports() {
-    const { champion, teamStats, battleStats, todayHighlights, ticker } = await aggregate();
+    // 先用静态占位数据立即显示，不卡网络
+    paintReports(null);
+    // 异步拉取最新战况刷新
+    aggregate()
+      .then((data) => paintReports(data))
+      .catch((e) => console.warn("[renderReports] 战报拉取失败:", e && e.message));
+  }
+
+  function paintReports(data) {
+    const champion = (data && data.champion) || null;
+    const teamStats = (data && data.teamStats) || teams.map((t) => ({ team: t.name, occupied: 0, participants: 0, power: 0, high: 0 }));
+    const battleStats = (data && data.battleStats) || battles.map(([name]) => ({
+      battle: name, rows: [], leader: { team: "暂无", sprint: 0, guard: 0, power: 0 },
+      second: { team: "暂无", power: 0 }, gap: 0, tag: "🔥 激烈争夺中",
+    }));
+    const todayHighlights = (data && data.todayHighlights) || { mvp: null, bestAttack: null, bestDefend: null, comboKing: null };
+    const ticker = (data && data.ticker) || [];
     $("#championStrip").innerHTML = champion && champion.power > 0 ? `<div>${teamAvatar(teamMeta.get(champion.team))}<span>当前排名第一战队</span><strong>👑 ${champion.team}</strong><span>占领战场：${champion.occupied}/5｜总战力：${champion.power}</span></div><b>${champion.occupied}/5</b>` : `<div><span>当前排名第一战队</span><strong>等待开球</strong><span>完成挑战后，冠军席位将实时刷新。</span></div><b>0/5</b>`;
     $("#teamBoard").innerHTML = teamStats.some((team) => team.power > 0) ? teamStats.map((team, index) => teamRow(team, index)).join("") : empty("暂无门店战力，先完成一局挑战。");
     $("#battleBoard").innerHTML = battleStats.map((stat) => reportBattleCard(stat)).join(""); $("#playerBoard").innerHTML = renderHighlights(todayHighlights); $("#liveTicker").innerHTML = renderTicker(ticker, teamStats);
@@ -516,7 +544,9 @@
     $("#battleChoices").addEventListener("click", (event) => { const button = event.target.closest("button"); if (!button) return; state.profile.battle = button.dataset.value; selectValue($("#battleChoices"), state.profile.battle); saveProfile(); });
     $("#battleNextBtn").addEventListener("click", () => showScreen("tacticScreen"));
     $("#tacticChoices").addEventListener("click", (event) => { const button = event.target.closest("button"); if (!button) return; state.profile.tactic = button.dataset.value; selectValue($("#tacticChoices"), state.profile.tactic); saveProfile(); });
-    $("#enterGameBtn").addEventListener("click", async () => { const name = state.profile.name || $("#playerName").value.trim(); if (!name) { showScreen("nameScreen"); return; } state.profile.name = name; const status = await fetchPlayerToday(); if (status.todayAttempts >= DAILY_LIMIT) { updateQuotaNote(); showScreen("nameScreen"); return; } saveProfile(); beginGame(); });
+    $("#enterGameBtn").addEventListener("click", async () => { const name = state.profile.name || $("#playerName").value.trim(); if (!name) { showScreen("nameScreen"); return; } state.profile.name = name; saveProfile(); beginGame(); // 先进入游戏，不卡在查今日次数
+      // 异步检查次数限制（超限会在提交时拦截）
+      fetchPlayerToday().then((status) => { if (status.todayAttempts >= DAILY_LIMIT) updateQuotaNote(); }).catch(() => {}); });
   }
 
   function saveProfile() { localStorage.setItem(PROFILE_KEY, JSON.stringify(state.profile)); }
