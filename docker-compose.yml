@@ -1,0 +1,54 @@
+# 《冲冠之路》Docker Compose 编排
+# 使用方式：
+#   开发/测试：docker compose up -d
+#   查看日志：docker compose logs -f
+#   停止：docker compose down
+#   重建：git pull origin main && docker compose up -d --build --force-recreate
+#   如果怀疑缓存：docker compose build --no-cache --pull && docker compose up -d --force-recreate
+#
+# 数据持久化：crown-data 卷挂载到 /app/data，SQLite 数据库文件保存在此
+# 端口映射：3000:8080，按需修改左侧端口（宿主机:容器）
+# 如需用 80 端口：改为 "80:8080" 并在 1Panel 反向代理中代理到 8080
+
+services:
+  crown:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      no_cache: true
+      pull: true
+    image: road-to-crown:latest
+    container_name: road-to-crown
+    restart: always
+    ports:
+      - "18080:8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - TZ=Asia/Shanghai
+      - DISABLE_CLUSTER=0
+    volumes:
+      - crown-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  crown-data:
+    driver: local

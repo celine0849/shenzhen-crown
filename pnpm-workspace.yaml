@@ -1,0 +1,6 @@
+# pnpm 11+ 配置文件
+# 批准 better-sqlite3 运行 install 脚本（编译原生模块）
+allowBuilds:
+  better-sqlite3: true
+onlyBuiltDependencies:
+  - better-sqlite3

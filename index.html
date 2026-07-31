@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#170B3D" />
+    <title>冲冠之路</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <div class="bg-grid" aria-hidden="true"></div>
+      <div class="speed-line one" aria-hidden="true"></div>
+      <div class="speed-line two" aria-hidden="true"></div>
+
+      <header class="top-brand">
+        <div>
+          <span>LANDZ REALTORS</span>
+          <strong>丽兹行</strong>
+        </div>
+        <div class="top-tools">
+          <button class="sound-toggle" id="soundToggle" type="button" aria-pressed="false">🔇 开启声音</button>
+          <em><i></i>LIVE 战况同步中</em>
+        </div>
+      </header>
+
+      <section class="screen active home-screen" id="homeScreen" aria-label="首页">
+        <div class="home-hero">
+          <p class="time-chip">6月28日08:00 - 6月30日23:59</p>
+          <h1>冲冠之路</h1>
+          <h2>下半场开球，六大战队抢占五大战场</h2>
+          <p class="hero-copy">
+            上半场已经落幕，下半场正式开球。六大战队集结上场，围绕五大战场展开争夺。
+          </p>
+          <p class="hero-copy">
+            每一次进攻，都是冲击领先；每一次防守，都是守住优势。最终冠军战队，将在7月月会现场获得「超A战队评选」额外加10分。
+          </p>
+        </div>
+
+        <div class="tactical-map" aria-label="五大战场战术板">
+          <div class="map-ring"></div>
+          <button type="button" class="map-node node-a">客户突破</button>
+          <button type="button" class="map-node node-b">房源深耕</button>
+          <button type="button" class="map-node node-c">AI助攻</button>
+          <button type="button" class="map-node node-d">团队协同</button>
+          <button type="button" class="map-node node-e">临门一脚</button>
+        </div>
+
+        <div class="champion-preview" id="homeChampion"></div>
+
+        <div class="home-actions">
+          <button class="primary-btn" id="startBtn" type="button">立即上场</button>
+          <button class="ghost-btn" data-target="reportScreen" type="button">实时战报</button>
+          <button class="ghost-btn" data-target="rulesScreen" type="button">活动规则</button>
+        </div>
+        <p class="sound-hint">建议开启声音，体验完整冲冠氛围。</p>
+        <p class="battle-slogan">战场正在变化，冠军尚未定局。</p>
+      </section>
+
+      <section class="screen" id="rulesScreen" aria-label="活动规则">
+        <div class="page-head">
+          <button class="icon-btn" data-target="homeScreen" aria-label="返回首页">‹</button>
+          <div>
+            <p>RULES</p>
+            <h2>活动规则</h2>
+          </div>
+        </div>
+        <div class="rule-list">
+          <article>
+            <span>01</span>
+            <h3>挑战机会</h3>
+            <p>每天按自然日重置，每人每天10次挑战机会，只记录当天最高一次有效成绩。</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>攻防计分</h3>
+            <p>发起进攻计入冲刺值，坚守防线计入守护值。门店在战场的总战力为冲刺值 + 守护值。</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>冠军归属</h3>
+            <p>每个战场总战力最高的门店占领该战场。最终占领战场数量最多的门店获得《冲冠之路》冠军。</p>
+          </article>
+          <article>
+            <span>04</span>
+            <h3>同分规则</h3>
+            <p>占领战场数量相同时，依次比较门店总战力、门店参与人数、门店最高个人单局分。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="screen" id="nameScreen" aria-label="输入姓名">
+        <div class="page-head">
+          <button class="icon-btn" data-target="homeScreen" aria-label="返回首页">‹</button>
+          <div>
+            <p>PLAYER</p>
+            <h2>领取上场身份</h2>
+          </div>
+        </div>
+        <form class="command-card" id="nameForm">
+          <label class="field">
+            <span>姓名</span>
+            <input id="playerName" maxlength="12" autocomplete="name" placeholder="请输入姓名" required />
+          </label>
+          <p class="setup-note" id="quotaNote"></p>
+          <button class="primary-btn" type="submit" id="nameNextBtn">加入战队</button>
+        </form>
+      </section>
+
+      <section class="screen" id="teamScreen" aria-label="选择战队">
+        <div class="page-head">
+          <button class="icon-btn" data-target="nameScreen" aria-label="返回姓名">‹</button>
+          <div>
+            <p>TEAM UP</p>
+            <h2>选择你的战队</h2>
+          </div>
+        </div>
+        <div class="team-grid" id="teamChoices"></div>
+        <div class="selection-callout" id="teamCallout"></div>
+        <button class="primary-btn sticky-action" id="teamNextBtn" type="button">选择战场</button>
+      </section>
+
+      <section class="screen" id="battleScreen" aria-label="选择战场">
+        <div class="page-head">
+          <button class="icon-btn" data-target="teamScreen" aria-label="返回战队">‹</button>
+          <div>
+            <p>BATTLEFIELD</p>
+            <h2>选择你的冲冠战场</h2>
+            <small>每一次选择，都会影响战场归属。</small>
+          </div>
+        </div>
+        <div class="battle-cards" id="battleChoices"></div>
+        <button class="primary-btn sticky-action" id="battleNextBtn" type="button">进入战术决策</button>
+      </section>
+
+      <section class="screen" id="tacticScreen" aria-label="选择战术">
+        <div class="page-head">
+          <button class="icon-btn" data-target="battleScreen" aria-label="返回战场">‹</button>
+          <div>
+            <p>TACTIC</p>
+            <h2>选择本局战术</h2>
+            <small id="tacticBattleName">当前战场：客户突破战场</small>
+          </div>
+        </div>
+        <div class="tactic-cards" id="tacticChoices">
+          <button type="button" class="tactic-card attack selected" data-value="发起进攻">
+            <span>⚔</span>
+            <h3>发起进攻</h3>
+            <p>冲击领先席位，抢下战场归属。</p>
+            <strong>本局得分计入【冲刺值】</strong>
+            <em>发起进攻</em>
+          </button>
+          <button type="button" class="tactic-card defend" data-value="坚守防线">
+            <span>🛡</span>
+            <h3>坚守防线</h3>
+            <p>守住当前优势，巩固战场席位。</p>
+            <strong>本局得分计入【守护值】</strong>
+            <em>坚守防线</em>
+          </button>
+        </div>
+        <p class="tactic-tip">下半场要赢，既要敢冲，也要守得住。</p>
+        <button class="primary-btn sticky-action" id="enterGameBtn" type="button">进入战术训练场</button>
+      </section>
+
+      <section class="screen game-screen" id="gameScreen" aria-label="点击挑战">
+        <div class="match-meta" id="matchMeta"></div>
+        <div class="game-hud">
+          <div>
+            <span>倒计时</span>
+            <strong><b id="timeLeft">60</b>s</strong>
+          </div>
+          <div>
+            <span>当前战力</span>
+            <strong id="scoreNow">0</strong>
+          </div>
+          <div>
+            <span>Combo</span>
+            <strong id="comboNow">0</strong>
+          </div>
+        </div>
+        <div class="arena" id="arena">
+          <div class="pitch-mark center"></div>
+          <div class="pitch-mark box top"></div>
+          <div class="pitch-mark box bottom"></div>
+          <div class="rush-edge"></div>
+          <div class="combo-line"></div>
+          <div class="countdown" id="countdown">3</div>
+          <div class="injecting" id="injecting">
+            <strong>战力注入中</strong>
+            <span></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="resultScreen" aria-label="挑战结果">
+        <div class="result-panel" id="resultPanel">
+          <p class="result-tag" id="resultTag">进攻完成！</p>
+          <h2 id="finalScore">0</h2>
+          <p id="resultSubtitle">距离反超更近一步！</p>
+          <p class="impact-copy" id="impactCopy"></p>
+          <div class="result-context" id="resultContext"></div>
+          <div class="result-stats">
+            <div>
+              <span>今日已挑战</span>
+              <strong id="todayAttempts">0/10</strong>
+            </div>
+            <div>
+              <span>今日有效最高</span>
+              <strong id="todayBest">0</strong>
+            </div>
+          </div>
+        </div>
+        <div class="home-actions">
+          <button class="primary-btn" id="playAgainBtn" type="button">再战一局</button>
+          <button class="ghost-btn" data-target="reportScreen" type="button">查看实时战报</button>
+          <button class="ghost-btn" id="shareBtn" type="button">召唤战友</button>
+        </div>
+      </section>
+
+      <section class="screen report-screen" id="reportScreen" aria-label="实时战报">
+        <div class="page-head report-head">
+          <button class="icon-btn" data-target="homeScreen" aria-label="返回首页">‹</button>
+          <div>
+            <p>LIVE</p>
+            <h2>实时战报</h2>
+            <small>战场正在变化，冠军尚未定局。</small>
+          </div>
+          <button class="mini-btn" id="seedBtn" type="button">演示数据</button>
+        </div>
+
+        <div class="report-section current-crown" id="championStrip"></div>
+
+        <section class="report-section">
+          <h3>冠军席位榜</h3>
+          <div class="team-board" id="teamBoard"></div>
+        </section>
+
+        <section class="report-section">
+          <h3>五大战场占领图</h3>
+          <div class="battle-board" id="battleBoard"></div>
+        </section>
+
+        <section class="report-section">
+          <h3>今日高光球员榜</h3>
+          <div class="highlight-board" id="playerBoard"></div>
+        </section>
+
+        <section class="report-section ticker-section">
+          <h3>实时动态播报</h3>
+          <div class="live-ticker" id="liveTicker"></div>
+        </section>
+      </section>
+    </main>
+
+    <script src="./audio-manager.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

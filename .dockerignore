@@ -1,0 +1,19 @@
+# Docker 构建忽略文件，减小构建上下文体积
+node_modules
+npm-debug.log*
+pnpm-debug.log*
+pnpm-lock.yaml
+data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.git
+.gitignore
+Dockerfile
+docker-compose.yml
+.dockerignore
+*.md
+!public/assets/audio/README.md
+.vscode
+.idea
