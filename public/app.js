@@ -250,7 +250,7 @@
       };
     }
     // 适配战场统计结构
-    const battleStats = data.battles.map((b) => ({
+    const battleStats = data.battleStats.map((b) => ({
       battle: b.battle, rows: b.rows || teams.map((team) => ({ team: team.name, battle: b.battle, sprint: 0, guard: 0, power: 0 })),
       leader: { ...(b.leader || {}), team: b.leader?.team || "暂无", sprint: b.sprint || 0, guard: b.guard || 0, power: b.power || 0 },
       second: { ...(b.second || {}), team: b.second?.team || "暂无" }, gap: b.gap || 0, tag: b.tag || "🔥 激烈争夺中",
