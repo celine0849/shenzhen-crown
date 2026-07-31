@@ -1,1 +1,0 @@
-{"name": "road-to-crown", "version": "1.0.0", "description": "深圳丽兹行冲冠之旅 - H5 活动游戏", "engines": {"node": ">=22.0.0"}, "dependencies": {"@supabase/supabase-js": "^2.45.0"}}
