@@ -217,6 +217,32 @@ exports.handler = async (event) => {
 
     if (action === "meta") return ok(await handleMeta(supabase));
 
+    // 诊断端点：报告环境变量情况 + 原始 fetch 到 Supabase 的完整错误
+    if (action === "diag") {
+      const envInfo = {
+        hasUrl: Boolean(process.env.SUPABASE_URL),
+        url: process.env.SUPABASE_URL ? process.env.SUPABASE_URL.replace(/^(https?:\/\/[^/]+).*/, "$1") : null,
+        hasServiceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+        serviceRolePrefix: (process.env.SUPABASE_SERVICE_ROLE_KEY || "").slice(0, 12),
+        hasAnon: Boolean(process.env.SUPABASE_ANON_KEY),
+        anonPrefix: (process.env.SUPABASE_ANON_KEY || "").slice(0, 12),
+        nodeVersion: process.version,
+      };
+      let fetchResult = "未执行";
+      const testUrl = (process.env.SUPABASE_URL || "") + "/rest/v1/chongguan_team_stats?select=*&limit=1";
+      const testKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "";
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 8000);
+        const r = await fetch(testUrl, { headers: { apikey: testKey, Authorization: "Bearer " + testKey }, signal: ctrl.signal });
+        clearTimeout(timer);
+        fetchResult = "HTTP " + r.status;
+      } catch (fe) {
+        fetchResult = "FETCH失败: " + fe.message + " | 根因:" + (fe.cause ? (fe.cause.code || fe.cause.message) : "无");
+      }
+      return ok({ envInfo, fetchResult });
+    }
+
     if (action === "leaderboard") {
       // battles 列表由前端以逗号分隔传入，保证战场完整
       const battlesParam = url.searchParams.get("battles");
