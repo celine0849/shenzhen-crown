@@ -79,7 +79,9 @@
 
   // 由原始成绩计算榜单（战队排行 + 五大战场占领）
   // 逻辑等价于原 Supabase 的 daily_best 视图：同一设备同一天只取最高分
+  // 注意：battleList 可能是对象数组 [{name,desc}] 或元组数组 [[name, desc]]，需兼容
   function computeLeaderboard(scores, teamList, battleList) {
+    const bName = (b) => Array.isArray(b) ? (b[0] || "") : (b.name || "");
     const bestMap = new Map();
     scores.forEach((s) => {
       const key = (s.deviceId || s.name || "anon") + "|" + s.submitDate;
@@ -97,12 +99,13 @@
     });
     const teamStats = teamList.map((t) => { const m = tm[t.name]; return { team: t.name, occupied: 0, participants: m.parts.size, power: m.power, high: m.high }; });
     const battleStats = battleList.map((b) => {
-      const rows = teamList.map((t) => { const p = tm[t.name].byBattle[b.name] || 0; return { team: t.name, battle: b.name, sprint: p, guard: 0, power: p }; });
+      const bn = bName(b);
+      const rows = teamList.map((t) => { const p = tm[t.name].byBattle[bn] || 0; return { team: t.name, battle: bn, sprint: p, guard: 0, power: p }; });
       const sorted = [...rows].sort((a, b) => b.power - a.power);
       const leader = sorted[0]?.power > 0 ? sorted[0] : { team: "暂无", power: 0 };
       const second = sorted[1]?.power > 0 ? sorted[1] : { team: "暂无", power: 0 };
       if (leader.team !== "暂无") { const ts = teamStats.find((x) => x.team === leader.team); if (ts) ts.occupied += 1; }
-      return { battle: b.name, rows, leader: leader.team, second: second.team, sprint: leader.power, guard: 0, power: leader.power, gap: Math.max(leader.power - second.power, 0), tag: "🔥 激烈争夺中" };
+      return { battle: bn, rows, leader: leader.team, second: second.team, sprint: leader.power, guard: 0, power: leader.power, gap: Math.max(leader.power - second.power, 0), tag: "🔥 激烈争夺中" };
     });
     const ranked = [...teamStats].sort((a, b) => (b.occupied - a.occupied) || (b.power - a.power) || (b.participants - a.participants) || (b.high - a.high));
     const champion = ranked[0]?.power > 0 ? ranked[0] : null;
