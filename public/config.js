@@ -16,7 +16,7 @@ window.CROWN_CONFIG = {
 
   // ---- Supabase 连接信息（从 Supabase 控制台 → Settings → API Keys 获取）----
   // 填入你的 Project URL 和 public anon key（publishable key）
-  supabaseUrl: "https://ljwuacjoynpotwkbpqdfq.supabase.co",
+  supabaseUrl: "https://jarcimaypcyvmrzluunv.supabase.co",
   supabaseAnonKey: "sb_publishable_MIhgynTsKwObVP-PCy8GLQ_5w8AX8X-",
 
   // ---- 召唤战友分享链接 ----
