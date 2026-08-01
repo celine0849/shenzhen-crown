@@ -159,22 +159,35 @@
     if (!teamRes || !battleRes || teamRes.error || battleRes.error) return null;
 
     const teamStats = (teamRes.data || []).map((t) => ({ team: t.team, occupied: 0, participants: t.participants || 0, power: t.power || 0, high: t.high || 0 }));
-    const battleStats = (battleRes.data || []).map((b) => ({
-      battle: b.battle, rows: [], leader: { team: "暂无", sprint: b.sprint || 0, guard: b.guard || 0, power: b.power || 0 },
-      second: { team: "暂无", power: 0 }, gap: 0, tag: "🔥 激烈争夺中",
-    }));
 
-    // 为每个战场填充各队行数据
-    battleStats.forEach((bs) => {
-      bs.rows = teamStats.map((ts) => ({ team: ts.team, battle: bs.battle, sprint: 0, guard: 0, power: 0 }));
-      const br = battleRes.data?.find((r) => r.battle === bs.battle);
-      if (br) {
-        bs.leader.sprint = br.sprint || 0; bs.leader.guard = br.guard || 0; bs.leader.power = br.power || 0;
-        // 找到该战场战力最高的队伍作为 leader
-        const leaderTeam = teamStats.find((t) => t.team === bs.leader.team);
-        if (leaderTeam) leaderTeam.occupied = (leaderTeam.occupied || 0) + 1;
+    // chongguan_battle_stats 视图：每行 (battle, team, sprint, guard, power) —— 按战场分组
+    const byBattle = {};
+    for (const row of (battleRes.data || [])) {
+      (byBattle[row.battle] = byBattle[row.battle] || []).push(row);
+    }
+    const knownBattles = battles.map((b) => b[0]);
+    const battleStats = [];
+    for (const battle of knownBattles) {
+      const rows = byBattle[battle] || [];
+      const sorted = [...rows].sort((a, b) => (b.power || 0) - (a.power || 0));
+      const top = sorted[0];
+      const second = sorted[1];
+      const leader = top
+        ? { team: top.team, sprint: top.sprint || 0, guard: top.guard || 0, power: top.power || 0 }
+        : { team: "暂无", sprint: 0, guard: 0, power: 0 };
+      battleStats.push({
+        battle,
+        rows: rows.map((r) => ({ team: r.team, battle, sprint: r.sprint || 0, guard: r.guard || 0, power: r.power || 0 })),
+        leader,
+        second: second ? { team: second.team, power: second.power || 0 } : { team: "暂无", power: 0 },
+        gap: top && second ? (top.power || 0) - (second.power || 0) : 0,
+        tag: "🔥 激烈争夺中",
+      });
+      if (leader.team !== "暂无") {
+        const lt = teamStats.find((t) => t.team === leader.team);
+        if (lt) lt.occupied = (lt.occupied || 0) + 1;
       }
-    });
+    }
 
     // 排名 & 冠军
     const ranked = [...teamStats].sort((a, b) => (b.occupied - a.occupied) || (b.power - a.power));
@@ -249,11 +262,14 @@
         todayHighlights: { mvp: null, bestAttack: null, bestDefend: null, comboKing: null }, ticker: [],
       };
     }
-    // 适配战场统计结构
-    const battleStats = data.battleStats.map((b) => ({
-      battle: b.battle, rows: b.rows || teams.map((team) => ({ team: team.name, battle: b.battle, sprint: 0, guard: 0, power: 0 })),
-      leader: { ...(b.leader || {}), team: b.leader?.team || "暂无", sprint: b.sprint || 0, guard: b.guard || 0, power: b.power || 0 },
-      second: { ...(b.second || {}), team: b.second?.team || "暂无" }, gap: b.gap || 0, tag: b.tag || "🔥 激烈争夺中",
+    // 适配战场统计结构（直接透传 leader/second，避免把顶层未定义值覆盖进去）
+    const battleStats = (data.battleStats || []).map((b) => ({
+      battle: b.battle,
+      rows: b.rows || [],
+      leader: b.leader || { team: "暂无", sprint: 0, guard: 0, power: 0 },
+      second: b.second || { team: "暂无", power: 0 },
+      gap: b.gap || 0,
+      tag: b.tag || "🔥 激烈争夺中",
     }));
     return { champion: data.champion, teamStats: data.teamStats, battleStats, todayHighlights: data.todayHighlights || {}, ticker: data.ticker || [] };
   }
