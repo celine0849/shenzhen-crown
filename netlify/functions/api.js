@@ -19,6 +19,7 @@ function getSupabase() {
     _supabase = createClient(url, key, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
+    console.log("[api] Supabase 客户端已创建 | URL:", url, "| Key前缀:", (key || "").slice(0, 12) + "...");
   }
   return _supabase;
 }
@@ -245,7 +246,8 @@ exports.handler = async (event) => {
 
     return fail(404, "未知 action: " + action);
   } catch (e) {
-    console.error("[api] 处理失败:", e.message);
-    return fail(500, e.message);
+    const cause = e.cause ? (e.cause.code || e.cause.message || String(e.cause)) : "";
+    console.error("[api] 处理失败:", e.message, "| 根因:", cause);
+    return fail(500, e.message + (cause ? " | 根因:" + cause : ""));
   }
 };
