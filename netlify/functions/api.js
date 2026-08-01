@@ -41,11 +41,48 @@ function fail(status, message) {
 
 // ============ 路由处理 ============
 
-// 连通性测试（查一个真实存在的视图，验证网络+凭据）
+// 连通性测试（SDK + 原生 fetch 双重验证）
 async function handleMeta(supabase) {
-  const { data, error } = await supabase.from("chongguan_team_stats").select("*").limit(1);
-  if (error) throw error;
-  return { ok: true, data };
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+  
+  // 测试1：SDK 查询
+  let sdkResult = null, sdkError = null;
+  try {
+    const { data, error } = await supabase.from("chongguan_team_stats").select("*").limit(1);
+    sdkResult = data; sdkError = error?.message;
+  } catch(e) { sdkError = e.message; }
+
+  // 测试2：原生 fetch 直连 PostgREST
+  let fetchStatus, fetchBody, fetchErr;
+  try {
+    const restUrl = url.replace(/\/$/, "") + "/rest/v1/chongguan_team_stats?select=*&limit=1";
+    const fRes = await fetch(restUrl, {
+      headers: { "apikey": key, "Authorization": "Bearer " + key },
+      signal: AbortSignal.timeout(10000)
+    });
+    fetchStatus = fRes.status;
+    fetchBody = await fRes.json();
+    if (!fRes.ok) fetchErr = `HTTP ${fRes.status}`;
+  } catch(e) { fetchErr = `FETCH: ${e.message}`; }
+
+  // 测试3：能否到达 supabase.com 主站
+  let mainSite;
+  try {
+    const r = await fetch("https://supabase.com", { signal: AbortSignal.timeout(8000) });
+    mainSite = `HTTP ${r.status} (${r.ok ? '可达' : '异常'})`;
+  } catch(e) { mainSite = `不可达: ${e.code || e.message}`; }
+
+  return { 
+    ok: !!(sdkResult || (fetchBody && !fetchErr)),
+    tests: { 
+      sdk: sdkResult ? `✅ ${sdkResult.length}行` : `❌ ${sdkError}`,
+      rawFetch: fetchBody && !fetchErr ? `✅ HTTP${fetchStatus}` : `❌ ${fetchErr}`,
+      supabaseDotCom: mainSite,
+      urlUsed: url,
+      keyType: key.startsWith("eyJ") ? "JWT(legacy)" : "new-format"
+    }
+  };
 }
 
 // 聚合榜单（战队排行 + 五大战场占领）
