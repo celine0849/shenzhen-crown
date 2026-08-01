@@ -98,16 +98,21 @@
       m.byBattle[s.battle] = (m.byBattle[s.battle] || 0) + (s.score || 0);
     });
     const teamStats = teamList.map((t) => { const m = tm[t.name]; return { team: t.name, occupied: 0, participants: m.parts.size, power: m.power, high: m.high }; });
+    // 无数据时的默认 leader/second（必须包含 sprint/guard，否则 UI 显示 undefined）
+    const EMPTY_LEADER = { team: "暂无", sprint: 0, guard: 0, power: 0 };
+    const EMPTY_SECOND = { team: "暂无", power: 0 };
     const battleStats = battleList.map((b) => {
       const bn = bName(b);
       const rows = teamList.map((t) => { const p = tm[t.name].byBattle[bn] || 0; return { team: t.name, battle: bn, sprint: p, guard: 0, power: p }; });
       const sorted = [...rows].sort((a, b) => b.power - a.power);
-      const leader = sorted[0]?.power > 0 ? sorted[0] : { team: "暂无", power: 0 };
-      const second = sorted[1]?.power > 0 ? sorted[1] : { team: "暂无", power: 0 };
+      const leader = sorted[0]?.power > 0 ? sorted[0] : { ...EMPTY_LEADER };
+      const second = sorted[1]?.power > 0 ? sorted[1] : { ...EMPTY_SECOND };
       if (leader.team !== "暂无") { const ts = teamStats.find((x) => x.team === leader.team); if (ts) ts.occupied += 1; }
-      return { battle: bn, rows, leader: leader.team, second: second.team, sprint: leader.power, guard: 0, power: leader.power, gap: Math.max(leader.power - second.power, 0), tag: "🔥 激烈争夺中" };
+      // leader/second 存完整对象（含 sprint/guard/power），不存纯字符串
+      return { battle: bn, rows, leader, second, sprint: leader.sprint || leader.power || 0, guard: leader.guard || 0, power: leader.power || 0, gap: Math.max((leader.power || 0) - (second.power || 0), 0), tag: "🔥 激烈争夺中" };
     });
-    const ranked = [...teamStats].sort((a, b) => (b.occupied - a.occupied) || (b.power - a.power) || (b.participants - a.participants) || (b.high - a.high));
+    // 排名：总战力优先（高→低），战力相同再看占领战场数、参与人数、单局最高分
+    const ranked = [...teamStats].sort((a, b) => (b.power - a.power) || (b.occupied - a.occupied) || (b.participants - a.participants) || (b.high - a.high));
     const champion = ranked[0]?.power > 0 ? ranked[0] : null;
     return { teamStats, battleStats, champion, todayHighlights: { mvp: null, bestAttack: null, bestDefend: null, comboKing: null }, ticker: [] };
   }
@@ -337,12 +342,15 @@
         todayHighlights: { mvp: null, bestAttack: null, bestDefend: null, comboKing: null }, ticker: [],
       };
     }
-    // 适配战场统计结构（直接透传 leader/second，避免把顶层未定义值覆盖进去）
+    // 适配战场统计结构（leader/second 现在是完整对象，直接透传）
     const battleStats = (data.battleStats || []).map((b) => ({
       battle: b.battle,
       rows: b.rows || [],
       leader: b.leader || { team: "暂无", sprint: 0, guard: 0, power: 0 },
-      second: b.second || { team: "暂无", power: 0 },
+      second: b.second || { team: "暂无", sprint: 0, guard: 0, power: 0 },
+      sprint: b.sprint || 0,
+      guard: b.guard || 0,
+      power: b.power || 0,
       gap: b.gap || 0,
       tag: b.tag || "🔥 激烈争夺中",
     }));
