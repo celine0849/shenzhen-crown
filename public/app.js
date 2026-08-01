@@ -10,40 +10,53 @@
   const DAILY_LIMIT = CFG.dailyLimit || 10;
   const PROFILE_KEY = CFG.profileKey || "road-to-crown-profile-v1";
 
-  // ============ Supabase 客户端初始化 ============
-  let supabase = null;
-  let supabaseStatus = "unknown"; // unknown | ok | failed
-  function initSupabase() {
-    try {
-      if (window.supabase && CFG.supabaseUrl && CFG.supabaseAnonKey) {
-        supabase = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
-        console.log("[supabase] 客户端已初始化 | URL:", CFG.supabaseUrl, "| Key前缀:", CFG.supabaseAnonKey.slice(0, 12) + "...");
-      }
-    } catch (e) {
-      console.warn("[supabase] 初始化失败:", e.message);
-      supabaseStatus = "failed";
-    }
+  // ============ API 中转代理（Netlify Functions → Supabase）============
+  // 前端不再直连 Supabase，避免中国大陆网络无法访问 supabase.co
+  // 所有数据请求走同源的 /api 接口，由 Netlify 海外服务器转发到 Supabase
+  let apiBase = "/api"; // 同源，无需完整域名
+
+  // GET 请求中转接口
+  async function apiGet(action, params) {
+    const qs = new URLSearchParams({ action, ...(params || {}) }).toString();
+    const res = await fetch(apiBase + "?" + qs, { method: "GET", headers: { Accept: "application/json" } });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+    return json;
   }
 
-  // 网络诊断：检测是否能连通 Supabase
+  // POST 请求中转接口
+  async function apiPost(action, body, params) {
+    const qs = new URLSearchParams({ action, ...(params || {}) }).toString();
+    const res = await fetch(apiBase + "?" + qs, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+    return json;
+  }
+
+  // 网络诊断：检测中转接口是否可达（间接验证 Supabase 连通）
+  let supabaseStatus = "unknown"; // unknown | ok | failed
   async function diagnoseNetwork() {
-    if (!supabase) { supabaseStatus = "failed"; return false; }
     const start = Date.now();
     try {
-      const res = await sbQuery(() => supabase.from("chongguan_meta").select("key").limit(1));
+      const res = await apiGet("meta");
       const elapsed = Date.now() - start;
-      if (res && !res.error) {
+      if (res && res.ok !== false) {
         supabaseStatus = "ok";
-        console.log("[diagnose] ✅ Supabase 连通正常 (" + elapsed + "ms)");
+        console.log("[diagnose] ✅ 中转接口连通正常 (" + elapsed + "ms)");
         return true;
-      } else {
-        supabaseStatus = "failed";
-        console.warn("[diagnose] ❌ Supabase 查询失败:", res?.error?.message || "未知错误", "(" + elapsed + "ms)");
-        return false;
       }
+      supabaseStatus = "failed";
+      console.warn("[diagnose] ❌ 中转接口返回异常:", res, "(" + elapsed + "ms)");
+      return false;
     } catch (e) {
       supabaseStatus = "failed";
-      console.warn("[diagnose] ❌ Supabase 网络异常:", e.message, "(" + (Date.now() - start) + "ms)");
+      console.warn("[diagnose] ❌ 中转接口不可达:", e.message, "(" + (Date.now() - start) + "ms)");
       return false;
     }
   }
@@ -168,133 +181,58 @@
     return { teams: teamStats, battles: battleStats, champion, todayHighlights: { mvp: null, bestAttack: null, bestDefend: null, comboKing: null }, ticker: [] };
   }
 
-  // ============ Supabase 直连查询 ============
+  // ============ 中转 API 查询（前端不直接连 Supabase）============
 
-  // Supabase 查询包装（带超时和详细错误日志）
-  async function sbQuery(fn) {
-    if (!supabase) { console.warn("[sbQuery] supabase 客户端未初始化"); return null; }
-    try {
-      const result = await Promise.race([
-        fn(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("查询超时(10s)")), 10000))
-      ]);
-      return result;
-    } catch (e) {
-      const msg = e.message || String(e);
-      // 分类错误类型，给出针对性建议
-      if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("ERR_CONNECTION")) {
-        console.warn("[sbQuery] ❌ 网络不可达:", msg, "| 请检查：1)是否能打开 https://supabase.co  2)公司防火墙是否拦截  3)是否需要开启VPN/代理");
-      } else if (msg.includes("401") || msg.includes("403") || msg.includes("Unauthorized") || msg.includes("invalid api key")) {
-        console.warn("[sbQuery] ❌ 认证失败:", msg, "| 建议检查 config.js 中的 supabaseAnonKey 是否正确（需使用 anon key，非 service_role 或 publishable 格式）");
-      } else if (msg.includes("超时")) {
-        console.warn("[sbQuery] ⏰", msg);
-      } else {
-        console.warn("[sbQuery] ❌ 查询异常:", msg);
-      }
-      return null;
-    }
-  }
-
-  // 从 Supabase 聚合榜单（替代原来的 GET /leaderboard）
-  async function sbAggregate() {
-    console.log("[sbAggregate] 开始查询 Supabase...");
+  // 聚合榜单（战队排行 + 五大战场占领）
+  async function fetchLeaderboard() {
+    console.log("[fetchLeaderboard] 请求中转接口...");
     const t0 = Date.now();
-    const [teamRes, battleRes] = await Promise.all([
-      sbQuery(() => supabase.from("chongguan_team_stats").select("*")),
-      sbQuery(() => supabase.from("chongguan_battle_stats").select("*")),
-    ]);
-    const elapsed = Date.now() - t0;
-    console.log("[sbAggregate] 查询耗时:", elapsed + "ms", "| teamRes:", teamRes ? (teamRes.error ? "error:"+teamRes.error.message : "ok("+((teamRes.data||[]).length)+"行)") : "null", "| battleRes:", battleRes ? (battleRes.error ? "error:"+battleRes.error.message : "ok("+((battleRes.data||[]).length)+"行)") : "null");
-    if (!teamRes || !battleRes || teamRes.error || battleRes.error) {
-      console.warn("[sbAggregate] ❌ 查询失败，返回 null | teamError:", teamRes?.error?.message || (teamRes ? "无" : "请求未返回"), "| battleError:", battleRes?.error?.message || (battleRes ? "无" : "请求未返回"));
+    const battleNames = battles.map((b) => b[0]).join("|");
+    try {
+      const data = await apiGet("leaderboard", { battles: battleNames, dailyLimit: DAILY_LIMIT });
+      const elapsed = Date.now() - t0;
+      console.log("[fetchLeaderboard] ✅ 成功 (" + elapsed + "ms) | champion:", data.champion?.team, data.champion?.power, "| teamStats:", data.teamStats?.length, "| battleStats:", data.battleStats?.length);
+      return data;
+    } catch (e) {
+      const elapsed = Date.now() - t0;
+      console.warn("[fetchLeaderboard] ❌ 失败 (" + elapsed + "ms):", e.message);
       return null;
     }
-
-    const teamStats = (teamRes.data || []).map((t) => ({ team: t.team, occupied: 0, participants: t.participants || 0, power: t.power || 0, high: t.high || 0 }));
-
-    // chongguan_battle_stats 视图：每行 (battle, team, sprint, guard, power) —— 按战场分组
-    const byBattle = {};
-    for (const row of (battleRes.data || [])) {
-      (byBattle[row.battle] = byBattle[row.battle] || []).push(row);
-    }
-    const knownBattles = battles.map((b) => b[0]);
-    const battleStats = [];
-    for (const battle of knownBattles) {
-      const rows = byBattle[battle] || [];
-      const sorted = [...rows].sort((a, b) => (b.power || 0) - (a.power || 0));
-      const top = sorted[0];
-      const second = sorted[1];
-      const leader = top
-        ? { team: top.team, sprint: top.sprint || 0, guard: top.guard || 0, power: top.power || 0 }
-        : { team: "暂无", sprint: 0, guard: 0, power: 0 };
-      battleStats.push({
-        battle,
-        rows: rows.map((r) => ({ team: r.team, battle, sprint: r.sprint || 0, guard: r.guard || 0, power: r.power || 0 })),
-        leader,
-        second: second ? { team: second.team, power: second.power || 0 } : { team: "暂无", power: 0 },
-        gap: top && second ? (top.power || 0) - (second.power || 0) : 0,
-        tag: "🔥 激烈争夺中",
-      });
-      if (leader.team !== "暂无") {
-        const lt = teamStats.find((t) => t.team === leader.team);
-        if (lt) lt.occupied = (lt.occupied || 0) + 1;
-      }
-    }
-
-    // 排名 & 冠军
-    const ranked = [...teamStats].sort((a, b) => (b.occupied - a.occupied) || (b.power - a.power));
-    const champion = ranked[0]?.power > 0 ? ranked[0] : null;
-
-    return { champion, teamStats, battleStats, todayHighlights: { mvp: null, bestAttack: null, bestDefend: null, comboKing: null }, ticker: [] };
   }
 
-  // 查询今日状态（替代 GET /players/today）
-  async function sbPlayerToday() {
+  // 查询今日状态
+  async function fetchPlayerTodayAPI() {
     const today = todayKey();
-    const res = await sbQuery(() => supabase.from("chongguan_scores")
-      .select("score", { count: "exact", head: true })
-      .eq("device_id", deviceId)
-      .eq("submit_date", today));
-    if (!res || res.error) return null;
-    const count = res.count || 0;
-    const bestRes = await sbQuery(() => supabase.from("chongguan_scores")
-      .select("score").eq("device_id", deviceId).eq("submit_date", today)
-      .order("score", { ascending: false }).limit(1).single());
-    const best = bestRes && !bestRes.error ? (bestRes.data?.score || 0) : 0;
-    return { todayAttempts: count, todayBest: best, remainingAttempts: Math.max(0, DAILY_LIMIT - count) };
+    try {
+      return await apiGet("player-today", { deviceId, today, dailyLimit: DAILY_LIMIT });
+    } catch (e) {
+      console.warn("[fetchPlayerTodayAPI] ❌ 失败:", e.message);
+      return null;
+    }
   }
 
-  // 提交成绩（替代 POST /scores）
-  async function sbSubmitScore(record) {
+  // 提交成绩
+  async function submitScoreAPI(record) {
     const today = todayKey();
     const now = new Date();
-    // 先查今日次数
-    const countRes = await sbQuery(() => supabase.from("chongguan_scores")
-      .select("*", { count: "exact", head: true }).eq("device_id", deviceId).eq("submit_date", today));
-    const attempts = (countRes?.count || 0);
-    if (attempts >= DAILY_LIMIT) {
-      const bestRes = await sbQuery(() => supabase.from("chongguan_scores").select("score")
-        .eq("device_id", deviceId).eq("submit_date", today).order("score", { ascending: false }).limit(1).single());
-      return { success: false, message: "今日挑战次数已用完", data: { todayAttempts: attempts, todayBest: bestRes?.data?.score || 0 } };
+    const body = {
+      deviceId,
+      name: record.name,
+      team: record.team,
+      battle: record.battle,
+      tactic: record.tactic,
+      score: record.score,
+      submitDate: today,
+      submitTime: `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
+      maxCombo: record.maxCombo || 0,
+      dailyLimit: DAILY_LIMIT,
+    };
+    try {
+      return await apiPost("submit", body);
+    } catch (e) {
+      console.warn("[submitScoreAPI] ❌ 失败:", e.message);
+      return { success: false, message: "提交失败：" + e.message };
     }
-    // upsert 玩家
-    await sbQuery(() => supabase.from("chongguan_players").upsert(
-      { device_id: deviceId, name: record.name, team: record.team, last_seen: now.toISOString() },
-      { onConflict: "device_id" }
-    ));
-    // 插入成绩
-    const insertRes = await sbQuery(() => supabase.from("chongguan_scores").insert({
-      device_id: deviceId, name: record.name, team: record.team,
-      battle: record.battle, tactic: record.tactic, score: record.score,
-      submit_date: today, submit_time: `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
-      daily_attempt: attempts + 1, max_combo: record.maxCombo || 0,
-    }).select("id").single());
-    if (!insertRes || insertRes.error) return { success: false, message: "提交失败，请重试" };
-    // 返回最新统计
-    const finalCount = attempts + 1;
-    const bestRes = await sbQuery(() => supabase.from("chongguan_scores").select("score")
-      .eq("device_id", deviceId).eq("submit_date", today).order("score", { ascending: false }).limit(1).single());
-    return { success: true, data: { todayAttempts: finalCount, todayBest: bestRes?.data?.score || record.score } };
   }
 
   // ============ 网络状态提示 ============
@@ -312,14 +250,14 @@
   let _aggregateRetry = false;
   async function aggregate() {
     if (USE_MOCK) return mockLeaderboard();
-    let data = await sbAggregate();
+    let data = await fetchLeaderboard();
     if (!data && !_aggregateRetry) {
       console.warn("[aggregate] 首次查询失败，2秒后自动重试...");
       _aggregateRetry = true;
       await new Promise((r) => setTimeout(r, 2000));
-      data = await sbAggregate();
+      data = await fetchLeaderboard();
       if (!data) {
-        console.warn("[aggregate] 重试也失败，确认 Supabase 不可达");
+        console.warn("[aggregate] 重试也失败，确认中转接口不可达");
         // 自动降级到离线模式
         USE_MOCK = true;
         showNetworkTip();
@@ -327,7 +265,7 @@
       }
     }
     _aggregateRetry = false;
-    console.log("[aggregate] sbAggregate 返回:", data ? "有数据" : "null/失败", "| champion:", data?.champion?.team, data?.champion?.power, "| teamStats:", data?.teamStats?.length, "| battleStats:", data?.battleStats?.length);
+    console.log("[aggregate] fetchLeaderboard 返回:", data ? "有数据" : "null/失败", "| champion:", data?.champion?.team, data?.champion?.power, "| teamStats:", data?.teamStats?.length, "| battleStats:", data?.battleStats?.length);
     if (!data) {
       return {
         champion: null,
@@ -354,7 +292,7 @@
 
   async function fetchPlayerToday() {
     if (USE_MOCK) return mockPlayerToday();
-    const data = await sbPlayerToday();
+    const data = await fetchPlayerTodayAPI();
     if (!data) return { todayAttempts: 0, todayBest: 0, remainingAttempts: DAILY_LIMIT };
     state.todayCache = { attempts: data.todayAttempts, best: data.todayBest };
     return data;
@@ -370,25 +308,19 @@
   }
 
   async function loadConfig() {
-    initSupabase();
-    // 测试 Supabase 连通性（带超时和详细诊断）
-    if (supabase) {
-      const ok = await Promise.race([
-        diagnoseNetwork(),
-        new Promise((resolve) => setTimeout(() => { console.warn("[config] ⏰ 连接测试超时(8s)，切换到离线模式"); resolve(false); }, 8000))
-      ]);
-      if (ok) {
-        console.log("[config] ✅ Supabase 连接正常，使用在线模式");
-        USE_MOCK = false;
-      } else {
-        console.warn("[config] ❌ Supabase 无法连接，切换到离线模式（数据仅存于本地浏览器）");
-        console.warn("[config] 💡 可能原因：1)公司网络限制  2)防火墙拦截supabase.co  3)DNS解析失败");
-        USE_MOCK = true;
-        showNetworkTip();
-      }
+    // 测试中转接口连通性（间接验证 Supabase）
+    const ok = await Promise.race([
+      diagnoseNetwork(),
+      new Promise((resolve) => setTimeout(() => { console.warn("[config] ⏰ 连接测试超时(8s)，切换到离线模式"); resolve(false); }, 8000))
+    ]);
+    if (ok) {
+      console.log("[config] ✅ 中转接口连接正常，使用在线模式");
+      USE_MOCK = false;
     } else {
-      console.warn("[config] ⚠️ 未配置 Supabase，使用离线模式");
+      console.warn("[config] ❌ 中转接口无法连接，切换到离线模式（数据仅存于本地浏览器）");
+      console.warn("[config] 💡 可能原因：1)Netlify Functions 未部署  2)环境变量 SUPABASE_SERVICE_ROLE_KEY 未配置  3)网络波动");
       USE_MOCK = true;
+      showNetworkTip();
     }
     // 加载战队/战场数据（始终从内置数据读取，保证一致性）
     const src = USE_MOCK ? MOCK : { teams: MOCK.teams, battles: MOCK.battles, gameName, subtitle: gameSubtitle, activityStart: CFG.activityStart, activityEnd: CFG.activityEnd };
@@ -578,7 +510,7 @@
 
   async function finishGame() {
     if (!state.running) return; state.running = false; clearGameTimers(); $("#arena").querySelectorAll(".target").forEach((node) => node.remove()); $("#injecting").classList.add("show");
-    const submitResult = USE_MOCK ? mockSubmit({ name: state.profile.name, team: state.profile.team, battle: state.profile.battle, tactic: state.profile.tactic, score: state.score, maxCombo: state.maxCombo, deviceId }) : await sbSubmitScore({ name: state.profile.name, team: state.profile.team, battle: state.profile.battle, tactic: state.profile.tactic, score: state.score, maxCombo: state.maxCombo });
+    const submitResult = USE_MOCK ? mockSubmit({ name: state.profile.name, team: state.profile.team, battle: state.profile.battle, tactic: state.profile.tactic, score: state.score, maxCombo: state.maxCombo, deviceId }) : await submitScoreAPI({ name: state.profile.name, team: state.profile.team, battle: state.profile.battle, tactic: state.profile.tactic, score: state.score, maxCombo: state.maxCombo });
     const accepted = submitResult.success; const count = accepted ? submitResult.data.todayAttempts : state.todayCache.attempts + 1; const todayBest = accepted ? submitResult.data.todayBest : state.todayCache.best;
     // 先用静态数据立即显示结果，不卡在 aggregate()
     renderResult(count, todayBest, null, !accepted ? submitResult.message : null);

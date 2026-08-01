@@ -12,37 +12,23 @@
   directory = "netlify/functions"
 
 # 环境变量（也可在 Netlify 控制台 → Site settings → Environment variables 中配置）
-# [build.environment]
-#   SUPABASE_URL = "https://xxxxx.supabase.co"
-#   SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6..."
-#   ACTIVITY_START = "2026-08-01T08:00:00+08:00"
-#   ACTIVITY_END = "2026-08-03T23:59:59+08:00"
-#   DAILY_LIMIT = "10"
+# 注意：service_role key 仅存于 Netlify 服务端，不会暴露给前端
+[build.environment]
+  SUPABASE_URL = "https://ljwuacjoynpotwkbpqdfq.supabase.co"
+  # service_role key 请在 Netlify 控制台单独设置（不要写在这里明文）
+  # SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+  # 备用（若不用 service_role）：anon key
+  # SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6..."
 
-# 重写规则：让 /api/* 走 Netlify Functions
+# 重写规则：统一走单个 api 函数，通过 ?action= 区分
 [[redirects]]
-  from = "/api/chongguan/config"
-  to = "/.netlify/functions/config"
+  from = "/api"
+  to = "/.netlify/functions/api"
   status = 200
 
 [[redirects]]
-  from = "/api/chongguan/scores"
-  to = "/.netlify/functions/scores"
-  status = 200
-
-[[redirects]]
-  from = "/api/chongguan/leaderboard"
-  to = "/.netlify/functions/leaderboard"
-  status = 200
-
-[[redirects]]
-  from = "/api/chongguan/players/today"
-  to = "/.netlify/functions/players-today"
-  status = 200
-
-[[redirects]]
-  from = "/api/health"
-  to = "/.netlify/functions/health"
+  from = "/api/*"
+  to = "/.netlify/functions/api"
   status = 200
 
 # SPA 兜底：所有未匹配路由返回 index.html

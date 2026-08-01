@@ -1,0 +1,8 @@
+{
+  "name": "shenzhen-crown",
+  "version": "1.0.0",
+  "description": "深圳丽兹行冲冠之旅 H5 - 前端静态 + Netlify Functions 中转 Supabase",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0"
+  }
+}
