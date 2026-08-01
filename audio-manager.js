@@ -3,17 +3,17 @@
   const FADE_MS = 420;
 
   const bgmConfig = {
-    main: { src: "assets/audio/bgm-main.mp3", volume: 0.25 },
-    game: { src: "assets/audio/bgm-game.mp3", volume: 0.35 },
+    main: { src: "assets/audio/bgm-main.wav", fallback: "assets/audio/bgm-main.mp3", volume: 0.25 },
+    game: { src: "assets/audio/bgm-game.wav", fallback: "assets/audio/bgm-game.mp3", volume: 0.35 },
   };
 
   const sfxConfig = {
-    hit: { src: "assets/audio/sfx-hit.mp3", volume: 0.45 },
-    bonus: { src: "assets/audio/sfx-bonus.mp3", volume: 0.55 },
-    miss: { src: "assets/audio/sfx-miss.mp3", volume: 0.4 },
-    combo: { src: "assets/audio/sfx-combo.mp3", volume: 0.5 },
-    success: { src: "assets/audio/sfx-success.mp3", volume: 0.55 },
-    leaderChange: { src: "assets/audio/sfx-leader-change.mp3", volume: 0.65 },
+    hit: { src: "assets/audio/sfx-hit.wav", fallback: "assets/audio/sfx-hit.mp3", volume: 0.45 },
+    bonus: { src: "assets/audio/sfx-bonus.wav", fallback: "assets/audio/sfx-bonus.mp3", volume: 0.55 },
+    miss: { src: "assets/audio/sfx-miss.wav", fallback: "assets/audio/sfx-miss.mp3", volume: 0.4 },
+    combo: { src: "assets/audio/sfx-combo.wav", fallback: "assets/audio/sfx-combo.mp3", volume: 0.5 },
+    success: { src: "assets/audio/sfx-success.wav", fallback: "assets/audio/sfx-success.mp3", volume: 0.55 },
+    leaderChange: { src: "assets/audio/sfx-leader-change.wav", fallback: "assets/audio/sfx-leader-change.mp3", volume: 0.65 },
   };
 
   const state = {
@@ -24,17 +24,22 @@
     fadeTimer: null,
     warned: new Set(),
     button: null,
+    audioContext: null,
+    busy: false,
   };
 
   const bgm = {};
   const sfx = {};
 
-  function createAudio(src, { loop = false, volume = 1 } = {}) {
+  function createAudio(src, { fallback = "", loop = false, volume = 1 } = {}) {
     const audio = new Audio(src);
     audio.preload = "auto";
     audio.loop = loop;
     audio.volume = volume;
-    audio.addEventListener("error", () => warnMissing(src), { once: true });
+    audio.__primarySrc = src;
+    audio.__fallbackSrc = fallback;
+    audio.__fallbackTried = false;
+    audio.addEventListener("error", () => switchToFallback(audio));
     return audio;
   }
 
@@ -44,11 +49,25 @@
     console.warn(`[AudioManager] 音频文件暂不可用，已静默跳过：${src}`);
   }
 
+  function switchToFallback(audio) {
+    const primary = audio.__primarySrc || audio.src;
+    const fallback = audio.__fallbackSrc;
+    if (fallback && !audio.__fallbackTried) {
+      audio.__fallbackTried = true;
+      warnMissing(primary);
+      audio.src = fallback;
+      audio.load();
+      return true;
+    }
+    warnMissing(audio.currentSrc || audio.src || primary);
+    return false;
+  }
+
   function init() {
-    bgm.main = createAudio(bgmConfig.main.src, { loop: true, volume: 0 });
-    bgm.game = createAudio(bgmConfig.game.src, { loop: true, volume: 0 });
+    bgm.main = createAudio(bgmConfig.main.src, { fallback: bgmConfig.main.fallback, loop: true, volume: 0 });
+    bgm.game = createAudio(bgmConfig.game.src, { fallback: bgmConfig.game.fallback, loop: true, volume: 0 });
     Object.keys(sfxConfig).forEach((key) => {
-      sfx[key] = createAudio(sfxConfig[key].src, { volume: sfxConfig[key].volume });
+      sfx[key] = createAudio(sfxConfig[key].src, { fallback: sfxConfig[key].fallback, volume: sfxConfig[key].volume });
     });
 
     state.enabled = localStorage.getItem(STORAGE_KEY) === "on";
@@ -62,9 +81,13 @@
   async function unlockAudio() {
     if (state.unlocked) return true;
     try {
-      const silent = createAudio("data:audio/mp3;base64,//uQZAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAACcQCA", { volume: 0 });
-      await silent.play();
-      silent.pause();
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (AudioContextClass) {
+        state.audioContext = state.audioContext || new AudioContextClass();
+        if (state.audioContext.state === "suspended") {
+          await state.audioContext.resume();
+        }
+      }
       state.unlocked = true;
       return true;
     } catch {
@@ -75,8 +98,14 @@
 
   function updateButton() {
     if (!state.button) return;
-    state.button.textContent = state.enabled ? "🔊 声音已开" : "🔇 开启声音";
-    state.button.setAttribute("aria-pressed", state.enabled ? "true" : "false");
+    if (state.busy) {
+      state.button.textContent = "🔊 开启中";
+      state.button.setAttribute("aria-pressed", "false");
+      return;
+    }
+    const active = state.enabled && state.unlocked;
+    state.button.textContent = active ? "🔊 声音已开" : "🔇 开启声音";
+    state.button.setAttribute("aria-pressed", active ? "true" : "false");
   }
 
   function playMainBgm() {
@@ -95,6 +124,22 @@
     return fadeToBgm("game", bgmConfig.game.volume);
   }
 
+  function currentBgmKey() {
+    return document.querySelector(".screen.active")?.id === "gameScreen" ? "game" : "main";
+  }
+
+  function resumeAudioContext() {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return Promise.resolve();
+      state.audioContext = state.audioContext || new AudioContextClass();
+      if (state.audioContext.state === "suspended") return state.audioContext.resume();
+    } catch {
+      return Promise.resolve();
+    }
+    return Promise.resolve();
+  }
+
   async function fadeToBgm(key, targetVolume) {
     if (!state.enabled) return;
     if (state.currentKey === key && state.currentBgm && !state.currentBgm.paused) {
@@ -105,7 +150,10 @@
     const next = bgm[key];
     if (!next) return;
     await unlockAudio();
-    if (!state.unlocked) return;
+    if (!state.unlocked) {
+      updateButton();
+      return;
+    }
 
     const previous = state.currentBgm;
     state.currentBgm = next;
@@ -117,9 +165,25 @@
       await next.play();
       fadeVolume(next, targetVolume, FADE_MS);
     } catch {
-      warnMissing(next.currentSrc || next.src);
-      return;
+      if (switchToFallback(next)) {
+        try {
+          await next.play();
+          fadeVolume(next, targetVolume, FADE_MS);
+        } catch {
+          warnMissing(next.currentSrc || next.src);
+          state.unlocked = false;
+          updateButton();
+          return;
+        }
+      } else {
+        state.unlocked = false;
+        updateButton();
+        return;
+      }
     }
+
+    state.unlocked = true;
+    updateButton();
 
     if (previous && previous !== next) {
       fadeVolume(previous, 0, FADE_MS, () => {
@@ -158,11 +222,12 @@
     if (!state.enabled || !state.unlocked) return;
     const config = sfxConfig[name];
     if (!config) return;
-    const base = sfx[name];
-    if (!base) return;
-    const audio = base.cloneNode(true);
+    const audio = createAudio(config.src, { fallback: config.fallback, volume: config.volume });
     audio.volume = config.volume;
-    audio.play().catch(() => warnMissing(config.src));
+    audio.play().catch(() => {
+      if (!switchToFallback(audio)) return;
+      audio.play().catch(() => warnMissing(config.fallback || config.src));
+    });
   }
 
   function setGameRush(active) {
@@ -172,21 +237,72 @@
 
   function mute() {
     state.enabled = false;
+    state.unlocked = false;
+    state.busy = false;
     localStorage.setItem(STORAGE_KEY, "off");
     stopBgm();
     updateButton();
   }
 
-  async function unmute() {
+  async function unmute(key = currentBgmKey()) {
+    if (state.busy) return;
+    state.busy = true;
     state.enabled = true;
     localStorage.setItem(STORAGE_KEY, "on");
     updateButton();
-    await unlockAudio();
-    playMainBgm();
+
+    const config = bgmConfig[key] || bgmConfig.main;
+    const next = bgm[key] || bgm.main;
+    if (!next) {
+      state.busy = false;
+      state.unlocked = false;
+      updateButton();
+      return;
+    }
+
+    const previous = state.currentBgm;
+    state.currentBgm = next;
+    state.currentKey = key;
+    next.loop = true;
+    next.volume = config.volume;
+
+    const resumePromise = resumeAudioContext();
+    let played = false;
+    try {
+      await next.play();
+      played = true;
+    } catch {
+      if (switchToFallback(next)) {
+        try {
+          await next.play();
+          played = true;
+        } catch {
+          played = false;
+        }
+      }
+    }
+
+    await resumePromise.catch(() => {});
+    state.busy = false;
+    state.unlocked = played;
+    if (!played) {
+      state.enabled = false;
+      localStorage.setItem(STORAGE_KEY, "off");
+      warnMissing(next.currentSrc || next.src || config.src);
+    } else if (previous && previous !== next) {
+      previous.pause();
+      previous.currentTime = 0;
+      previous.volume = 0;
+    }
+    updateButton();
   }
 
-  function toggleMute() {
-    if (state.enabled) {
+  function toggleMute(event) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    if (state.enabled && state.unlocked) {
       mute();
     } else {
       unmute();

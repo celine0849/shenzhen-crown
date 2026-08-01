@@ -4,7 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#170B3D" />
-    <title>冲冠之路</title>
+    <meta name="description" content="深圳丽兹行冲冠之旅：十八大门店战队抢占五大战场。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="LANDZ REALTORS 丽兹行" />
+    <meta property="og:title" content="深圳丽兹行冲冠之旅" />
+    <meta property="og:description" content="十八大门店战队开球，抢占五大战场。实时战报、进攻防守、冠军加分。" />
+    <meta property="og:url" content="./" />
+    <meta property="og:image" content="./assets/images/share-cover.jpg" />
+    <meta property="og:image:type" content="image/jpeg" />
+    <meta property="og:image:width" content="600" />
+    <meta property="og:image:height" content="600" />
+    <meta itemprop="image" content="./assets/images/share-cover.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="深圳丽兹行冲冠之旅" />
+    <meta name="twitter:description" content="十八大门店战队开球，抢占五大战场。" />
+    <meta name="twitter:image" content="./assets/images/share-cover.jpg" />
+    <link rel="image_src" href="./assets/images/share-cover.jpg" />
+    <link rel="canonical" href="./" />
+    <title>深圳丽兹行冲冠之旅</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -26,14 +43,14 @@
 
       <section class="screen active home-screen" id="homeScreen" aria-label="首页">
         <div class="home-hero">
-          <p class="time-chip">6月28日08:00 - 6月30日23:59</p>
-          <h1>冲冠之路</h1>
-          <h2>下半场开球，六大战队抢占五大战场</h2>
+          <p class="time-chip" id="timeChip">活动时间以门店通知为准</p>
+          <h1 id="gameTitle">深圳丽兹行冲冠之旅</h1>
+          <h2 id="gameSubtitle">十八大门店战队，五大战场，抢占冲冠王座</h2>
           <p class="hero-copy">
-            上半场已经落幕，下半场正式开球。六大战队集结上场，围绕五大战场展开争夺。
+            深圳丽兹行十八大门店战队集结上场，围绕五大战场展开争夺。每一次进攻，都是冲击领先；每一次防守，都是守住优势。
           </p>
           <p class="hero-copy">
-            每一次进攻，都是冲击领先；每一次防守，都是守住优势。最终冠军战队，将在7月月会现场获得「超A战队评选」额外加10分。
+            最终占领战场数量最多的门店战队，将赢得《深圳丽兹行冲冠之旅》冠军，在月会现场获得额外加分。
           </p>
         </div>
 
@@ -79,7 +96,7 @@
           <article>
             <span>03</span>
             <h3>冠军归属</h3>
-            <p>每个战场总战力最高的门店占领该战场。最终占领战场数量最多的门店获得《冲冠之路》冠军。</p>
+            <p>每个战场总战力最高的门店占领该战场。最终占领战场数量最多的门店获得《深圳丽兹行冲冠之旅》冠军。</p>
           </article>
           <article>
             <span>04</span>
@@ -225,7 +242,7 @@
             <h2>实时战报</h2>
             <small>战场正在变化，冠军尚未定局。</small>
           </div>
-          <button class="mini-btn" id="seedBtn" type="button">演示数据</button>
+
         </div>
 
         <div class="report-section current-crown" id="championStrip"></div>
@@ -252,6 +269,7 @@
       </section>
     </main>
 
+    <script src="./config.js"></script>
     <script src="./audio-manager.js"></script>
     <script src="./app.js"></script>
   </body>
