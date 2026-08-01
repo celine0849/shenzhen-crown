@@ -26,16 +26,16 @@
   }
   async function ensureCloudbaseSDK() {
     if (window.cloudbase || window.tcb) return true;
+    // tcb-js-sdk 是暴露 window.cloudbase 的 UMD 包（init/auth/database API）
     const cdns = [
-      "https://cdn.jsdelivr.net/npm/@cloudbase/js-sdk@3.18.0/dist/cloudbase.full.js",
-      "https://unpkg.com/@cloudbase/js-sdk@3.18.0/dist/cloudbase.full.js",
-      "https://sdk.tencentcloud.cdn.cloudbase.vip/cloudbase.full.js",
+      "https://cdn.jsdelivr.net/npm/tcb-js-sdk@2.11.1/tcb.min.js",
+      "https://unpkg.com/tcb-js-sdk@2.11.1/tcb.min.js",
+      "https://cdn.staticfile.org/tcb-js-sdk/2.11.1/tcb.min.js",
     ];
     for (const cdn of cdns) {
       try {
         await loadScript(cdn);
         if (window.cloudbase) { console.log("[tcb] ✅ SDK 加载成功 (" + cdn + ")"); return true; }
-        // 兼容部分版本暴露为 window.tcb
         if (window.tcb) { window.cloudbase = window.tcb; console.log("[tcb] ✅ SDK 加载成功 (window.tcb, " + cdn + ")"); return true; }
       } catch (e) { console.warn("[tcb] ❌ CDN 失败:", cdn); }
     }
