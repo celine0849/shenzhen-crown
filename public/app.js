@@ -1,6 +1,6 @@
-// 《深圳丽兹行冲冠之旅》前端业务逻辑（Supabase 直连版）
-// 部署模式：纯静态前端 → 直连 Supabase PostgreSQL → 无需后端/Functions
-// 数据来源：Supabase（chongguan_scores / chongguan_players / 视图）
+// 《深圳丽兹行冲冠之旅》前端业务逻辑（腾讯云开发 CloudBase 版）
+// 部署模式：纯静态前端 → 直连腾讯云开发文档数据库（大陆原生访问，不用墙）
+// 数据来源：CloudBase（scores / players 集合）
 // 兜底：离线模式（USE_MOCK）+ localStorage，双击 index.html 可玩
 
 (function () {
@@ -10,55 +10,104 @@
   const DAILY_LIMIT = CFG.dailyLimit || 10;
   const PROFILE_KEY = CFG.profileKey || "road-to-crown-profile-v1";
 
-  // ============ API 中转代理（Netlify Functions → Supabase）============
-  // 前端不再直连 Supabase，避免中国大陆网络无法访问 supabase.co
-  // 所有数据请求走同源的 /api 接口，由 Netlify 海外服务器转发到 Supabase
-  let apiBase = "/api"; // 同源，无需完整域名
+  // ============ 腾讯云开发 CloudBase 数据层 ============
+  // 大陆原生访问，无需翻墙。前端用 Web SDK + 匿名登录直连文档数据库。
+  let tcbApp = null, tcbDb = null, tcbReady = false;
+  const TCB_ENV = CFG.cloudbaseEnv;
+  let tcbStatus = "unknown"; // unknown | ok | failed
 
-  // GET 请求中转接口
-  async function apiGet(action, params) {
-    const qs = new URLSearchParams({ action, ...(params || {}) }).toString();
-    const res = await fetch(apiBase + "?" + qs, { method: "GET", headers: { Accept: "application/json" } });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const json = await res.json();
-    if (json.error) throw new Error(json.error);
-    return json;
-  }
-
-  // POST 请求中转接口
-  async function apiPost(action, body, params) {
-    const qs = new URLSearchParams({ action, ...(params || {}) }).toString();
-    const res = await fetch(apiBase + "?" + qs, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(body || {}),
+  // 加载 CloudBase Web SDK（腾讯官方 UMD，大陆可达，file:// 也能用）
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error("加载失败: " + src));
+      document.head.appendChild(s);
     });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const json = await res.json();
-    if (json.error) throw new Error(json.error);
-    return json;
+  }
+  async function ensureCloudbaseSDK() {
+    if (window.cloudbase) return true;
+    const cdns = [
+      "https://imgcache.qq.com/qcloud/tcbjs/1.8.0/tcb.js",
+      "https://imgcache.qq.com/qcloud/tcbjs/1.9.1/tcb.js",
+    ];
+    for (const cdn of cdns) {
+      try { await loadScript(cdn); if (window.cloudbase) { console.log("[tcb] SDK 加载成功 (" + cdn + ")"); return true; } } catch (e) { console.warn("[tcb] CDN 失败:", cdn); }
+    }
+    return false;
   }
 
-  // 网络诊断：检测中转接口是否可达（间接验证 Supabase 连通）
-  let supabaseStatus = "unknown"; // unknown | ok | failed
-  async function diagnoseNetwork() {
-    const start = Date.now();
+  // 初始化 + 匿名登录
+  async function initCloudBase() {
+    const okSDK = await ensureCloudbaseSDK();
+    if (!okSDK || !TCB_ENV) { tcbStatus = "failed"; console.warn("[tcb] SDK 未加载或缺少 cloudbaseEnv"); return false; }
     try {
-      const res = await apiGet("meta");
-      const elapsed = Date.now() - start;
-      if (res && res.ok !== false) {
-        supabaseStatus = "ok";
-        console.log("[diagnose] ✅ 中转接口连通正常 (" + elapsed + "ms)");
-        return true;
-      }
-      supabaseStatus = "failed";
-      console.warn("[diagnose] ❌ 中转接口返回异常:", res, "(" + elapsed + "ms)");
-      return false;
+      tcbApp = window.cloudbase.init({ env: TCB_ENV });
+      await tcbApp.auth().signInAnonymously();
+      tcbDb = tcbApp.database();
+      tcbReady = true; tcbStatus = "ok";
+      console.log("[tcb] ✅ 初始化并匿名登录成功 (env=" + TCB_ENV + ")");
+      return true;
     } catch (e) {
-      supabaseStatus = "failed";
-      console.warn("[diagnose] ❌ 中转接口不可达:", e.message, "(" + (Date.now() - start) + "ms)");
+      tcbStatus = "failed";
+      console.warn("[tcb] ❌ 初始化失败:", e.message, "| 请确认：1)控制台已开启匿名登录 2)已添加本域名到安全域名");
       return false;
     }
+  }
+
+  // 分页拉取全部成绩（免费版单次最多 1000 条）
+  async function tcbGetAllScores() {
+    let all = [], skip = 0;
+    while (true) {
+      const res = await tcbDb.collection("scores").limit(1000).skip(skip).get();
+      const list = res.data || [];
+      all = all.concat(list);
+      if (list.length < 1000) break;
+      skip += 1000;
+    }
+    return all;
+  }
+
+  // 提交成绩 + upsert 玩家
+  async function tcbSubmitScore(rec) {
+    await tcbDb.collection("scores").add(rec);
+    const pres = await tcbDb.collection("players").where({ deviceId: rec.deviceId }).limit(1).get();
+    if (pres.data && pres.data.length) {
+      await tcbDb.collection("players").doc(pres.data[0]._id).update({ name: rec.name, team: rec.team, lastSeen: new Date() });
+    } else {
+      await tcbDb.collection("players").add({ deviceId: rec.deviceId, name: rec.name, team: rec.team, firstSeen: new Date(), lastSeen: new Date() });
+    }
+  }
+
+  // 由原始成绩计算榜单（战队排行 + 五大战场占领）
+  // 逻辑等价于原 Supabase 的 daily_best 视图：同一设备同一天只取最高分
+  function computeLeaderboard(scores, teamList, battleList) {
+    const bestMap = new Map();
+    scores.forEach((s) => {
+      const key = (s.deviceId || s.name || "anon") + "|" + s.submitDate;
+      const cur = bestMap.get(key);
+      if (!cur || (s.score || 0) > (cur.score || 0)) bestMap.set(key, s);
+    });
+    const bestScores = [...bestMap.values()];
+    const tm = {};
+    teamList.forEach((t) => { tm[t.name] = { power: 0, high: 0, parts: new Set(), byBattle: {} }; });
+    bestScores.forEach((s) => {
+      const m = tm[s.team]; if (!m) return;
+      m.power += s.score || 0; m.high = Math.max(m.high, s.score || 0);
+      m.parts.add(s.deviceId || s.name || "anon");
+      m.byBattle[s.battle] = (m.byBattle[s.battle] || 0) + (s.score || 0);
+    });
+    const teamStats = teamList.map((t) => { const m = tm[t.name]; return { team: t.name, occupied: 0, participants: m.parts.size, power: m.power, high: m.high }; });
+    const battleStats = battleList.map((b) => {
+      const rows = teamList.map((t) => { const p = tm[t.name].byBattle[b.name] || 0; return { team: t.name, battle: b.name, sprint: p, guard: 0, power: p }; });
+      const sorted = [...rows].sort((a, b) => b.power - a.power);
+      const leader = sorted[0]?.power > 0 ? sorted[0] : { team: "暂无", power: 0 };
+      const second = sorted[1]?.power > 0 ? sorted[1] : { team: "暂无", power: 0 };
+      if (leader.team !== "暂无") { const ts = teamStats.find((x) => x.team === leader.team); if (ts) ts.occupied += 1; }
+      return { battle: b.name, rows, leader: leader.team, second: second.team, sprint: leader.power, guard: 0, power: leader.power, gap: Math.max(leader.power - second.power, 0), tag: "🔥 激烈争夺中" };
+    });
+    const ranked = [...teamStats].sort((a, b) => (b.occupied - a.occupied) || (b.power - a.power) || (b.participants - a.participants) || (b.high - a.high));
+    const champion = ranked[0]?.power > 0 ? ranked[0] : null;
+    return { teamStats, battleStats, champion, todayHighlights: { mvp: null, bestAttack: null, bestDefend: null, comboKing: null }, ticker: [] };
   }
 
   // 设备唯一标识
@@ -178,33 +227,37 @@
     });
     const ranked = [...teamStats].sort((a, b) => (b.occupied - a.occupied) || (b.power - a.power) || (b.participants - a.participants) || (b.high - a.high));
     const champion = ranked[0]?.power > 0 ? ranked[0] : null;
-    return { teams: teamStats, battles: battleStats, champion, todayHighlights: { mvp: null, bestAttack: null, bestDefend: null, comboKing: null }, ticker: [] };
+    return { teamStats, battleStats, champion, todayHighlights: { mvp: null, bestAttack: null, bestDefend: null, comboKing: null }, ticker: [] };
   }
 
-  // ============ 中转 API 查询（前端不直接连 Supabase）============
+  // ============ CloudBase 查询（前端直连文档数据库）============
 
   // 聚合榜单（战队排行 + 五大战场占领）
   async function fetchLeaderboard() {
-    console.log("[fetchLeaderboard] 请求中转接口...");
+    if (!tcbReady) return null;
+    console.log("[fetchLeaderboard] 从 CloudBase 拉取成绩...");
     const t0 = Date.now();
-    const battleNames = battles.map((b) => b[0]).join("|");
     try {
-      const data = await apiGet("leaderboard", { battles: battleNames, dailyLimit: DAILY_LIMIT });
+      const scores = await tcbGetAllScores();
+      const data = computeLeaderboard(scores, teams, battles);
       const elapsed = Date.now() - t0;
-      console.log("[fetchLeaderboard] ✅ 成功 (" + elapsed + "ms) | champion:", data.champion?.team, data.champion?.power, "| teamStats:", data.teamStats?.length, "| battleStats:", data.battleStats?.length);
+      console.log("[fetchLeaderboard] ✅ 成功 (" + elapsed + "ms) | 总记录:", scores.length, "| champion:", data.champion?.team, data.champion?.power, "| teamStats:", data.teams?.length, "| battleStats:", data.battles?.length);
       return data;
     } catch (e) {
-      const elapsed = Date.now() - t0;
-      console.warn("[fetchLeaderboard] ❌ 失败 (" + elapsed + "ms):", e.message);
+      console.warn("[fetchLeaderboard] ❌ 失败 (" + (Date.now() - t0) + "ms):", e.message);
       return null;
     }
   }
 
   // 查询今日状态
   async function fetchPlayerTodayAPI() {
+    if (!tcbReady) return null;
     const today = todayKey();
     try {
-      return await apiGet("player-today", { deviceId, today, dailyLimit: DAILY_LIMIT });
+      const res = await tcbDb.collection("scores").where({ deviceId, submitDate: today }).get();
+      const list = res.data || [];
+      const best = list.length ? Math.max(...list.map((s) => s.score || 0)) : 0;
+      return { todayAttempts: list.length, todayBest: best, remainingAttempts: Math.max(0, DAILY_LIMIT - list.length) };
     } catch (e) {
       console.warn("[fetchPlayerTodayAPI] ❌ 失败:", e.message);
       return null;
@@ -213,9 +266,10 @@
 
   // 提交成绩
   async function submitScoreAPI(record) {
+    if (!tcbReady) return { success: false, message: "未连接到云数据库" };
     const today = todayKey();
     const now = new Date();
-    const body = {
+    const rec = {
       deviceId,
       name: record.name,
       team: record.team,
@@ -225,10 +279,13 @@
       submitDate: today,
       submitTime: `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
       maxCombo: record.maxCombo || 0,
-      dailyLimit: DAILY_LIMIT,
+      createdAt: now,
     };
     try {
-      return await apiPost("submit", body);
+      await tcbSubmitScore(rec);
+      const res = await tcbDb.collection("scores").where({ deviceId, submitDate: today }).get();
+      const list = res.data || [];
+      return { success: true, data: { todayAttempts: list.length, todayBest: list.length ? Math.max(...list.map((s) => s.score || 0)) : record.score } };
     } catch (e) {
       console.warn("[submitScoreAPI] ❌ 失败:", e.message);
       return { success: false, message: "提交失败：" + e.message };
@@ -308,22 +365,22 @@
   }
 
   async function loadConfig() {
-    // 测试中转接口连通性（间接验证 Supabase）
+    // 初始化腾讯云开发（匿名登录），超时 8s 则降级离线
     const ok = await Promise.race([
-      diagnoseNetwork(),
-      new Promise((resolve) => setTimeout(() => { console.warn("[config] ⏰ 连接测试超时(8s)，切换到离线模式"); resolve(false); }, 8000))
+      initCloudBase(),
+      new Promise((resolve) => setTimeout(() => { console.warn("[config] ⏰ CloudBase 初始化超时(8s)，切换到离线模式"); resolve(false); }, 8000))
     ]);
     if (ok) {
-      console.log("[config] ✅ 中转接口连接正常，使用在线模式");
+      console.log("[config] ✅ CloudBase 连接正常，使用在线模式");
       USE_MOCK = false;
     } else {
-      console.warn("[config] ❌ 中转接口无法连接，切换到离线模式（数据仅存于本地浏览器）");
-      console.warn("[config] 💡 可能原因：1)Netlify Functions 未部署  2)环境变量 SUPABASE_SERVICE_ROLE_KEY 未配置  3)网络波动");
+      console.warn("[config] ❌ CloudBase 无法连接，切换到离线模式（数据仅存于本地浏览器）");
+      console.warn("[config] 💡 可能原因：1)未开启匿名登录  2)本域名未加入安全域名  3)SDK CDN 被拦截");
       USE_MOCK = true;
       showNetworkTip();
     }
     // 加载战队/战场数据（始终从内置数据读取，保证一致性）
-    const src = USE_MOCK ? MOCK : { teams: MOCK.teams, battles: MOCK.battles, gameName, subtitle: gameSubtitle, activityStart: CFG.activityStart, activityEnd: CFG.activityEnd };
+    const src = { teams: MOCK.teams, battles: MOCK.battles, gameName, subtitle: gameSubtitle, activityStart: CFG.activityStart, activityEnd: CFG.activityEnd };
     teams = (src.teams || []).map((t) => ({ name: t.name, short: t.short || t.name.slice(0, 2), color: t.color || "#8A8FA3" }));
     battles = (src.battles || []).map((b) => [b.name, b.desc || b.description || ""]);
     if (src.gameName) gameName = src.gameName;

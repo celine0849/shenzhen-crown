@@ -3,7 +3,7 @@
 // 修改本文件即可调整活动参数，无需改动业务代码
 // 配置会挂载到 window.CROWN_CONFIG，供 app.js 读取
 //
-// 部署模式：前端直连 Supabase（纯静态，无需后端/Functions）
+// 部署模式：前端直连腾讯云开发 CloudBase（大陆原生访问，无需翻墙）
 // ============================================================
 
 window.CROWN_CONFIG = {
@@ -14,10 +14,8 @@ window.CROWN_CONFIG = {
   // ---- 每人每日挑战次数上限 ----
   dailyLimit: 10,
 
-  // ---- Supabase 连接信息（从 Supabase 控制台 → Settings → API Keys 获取）----
-  // 填入你的 Project URL 和 public anon key（publishable key）
-  supabaseUrl: "https://jarcimaypcyvmrzluunv.supabase.co",
-  supabaseAnonKey: "sb_publishable_MIhgynTsKwObVP-PCy8GLQ_5w8AX8X-",
+  // ---- 腾讯云开发 CloudBase 环境 ID（从控制台 → 环境管理 获取）----
+  cloudbaseEnv: "shenzhen-crown-d8gfabegcb4845e59",
 
   // ---- 召唤战友分享链接 ----
   shareUrl: "",
@@ -27,5 +25,3 @@ window.CROWN_CONFIG = {
   // ---- localStorage 存储键名 ----
   profileKey: "road-to-crown-profile-v1",
 };
-// env updated
-// redeploy to load new env vars 1785550712
