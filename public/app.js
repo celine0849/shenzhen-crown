@@ -156,7 +156,8 @@
       sbQuery(() => supabase.from("chongguan_team_stats").select("*")),
       sbQuery(() => supabase.from("chongguan_battle_stats").select("*")),
     ]);
-    if (!teamRes || !battleRes || teamRes.error || battleRes.error) return null;
+    if (!teamRes || !battleRes || teamRes.error || battleRes.error) { console.warn("[sbAggregate] 查询失败: teamRes=", teamRes?.error?.message || "null", "battleRes=", battleRes?.error?.message || "null"); return null; }
+    console.log("[sbAggregate] teamStats 行数:", (teamRes.data || []).length, "| battleStats 行数:", (battleRes.data || []).length);
 
     const teamStats = (teamRes.data || []).map((t) => ({ team: t.team, occupied: 0, participants: t.participants || 0, power: t.power || 0, high: t.high || 0 }));
 
@@ -250,6 +251,7 @@
   async function aggregate() {
     if (USE_MOCK) return mockLeaderboard();
     const data = await sbAggregate();
+    console.log("[aggregate] sbAggregate 返回:", data ? "有数据" : "null/失败", "| champion:", data?.champion?.team, data?.champion?.power, "| teamStats:", data?.teamStats?.length, "| battleStats:", data?.battleStats?.length);
     if (!data) {
       return {
         champion: null,
@@ -377,22 +379,27 @@
       ? new Map(data.teamStats.map((team, index) => [team.team, { ...team, rank: index + 1 }]))
       : null;
     const loading = !hasData; // 数据还在加载中
-    $("#teamChoices").innerHTML = teams.map((team, index) => {
-      const stat = (teamRank && teamRank.get(team.name)) || { rank: index + 1, power: 0 };
-      const powerText = loading ? "<em>···</em>" : stat.power;
-      const rankText = loading ? "<em>···</em>" : `No.${stat.rank}`;
-      return `<button type="button" class="team-card" data-value="${team.name}">${teamAvatar(team)}<h3>${team.name}</h3><p><span>当前排名</span><strong>${rankText}</strong></p><p><span>当前总战力</span><strong>${powerText}</strong></p></button>`;
-    }).join("");
-    const battleStats = (data && data.battleStats) || battles.map(([name]) => ({
-      battle: name, rows: [], leader: { team: "暂无", sprint: 0, guard: 0, power: 0 },
-      second: { team: "暂无", power: 0 }, gap: 0, tag: "🔥 激烈争夺中",
-    }));
-    $("#battleChoices").innerHTML = battleStats.map((stat) => battleCard(stat)).join("");
-    selectValue($("#teamChoices"), state.profile.team);
-    selectValue($("#battleChoices"), state.profile.battle);
-    selectValue($("#tacticChoices"), state.profile.tactic);
+    console.log("[paintChoices] data来源:", data ? "Supabase实时" : "占位", "| hasData:", hasData, "| teamRank size:", teamRank?.size || 0);
+    try {
+      $("#teamChoices").innerHTML = teams.map((team, index) => {
+        const stat = (teamRank && teamRank.get(team.name)) || { rank: index + 1, power: 0 };
+        const powerText = loading ? "<em>···</em>" : stat.power;
+        const rankText = loading ? "<em>···</em>" : `No.${stat.rank}`;
+        return `<button type="button" class="team-card" data-value="${team.name}">${teamAvatar(team)}<h3>${team.name}</h3><p><span>当前排名</span><strong>${rankText}</strong></p><p><span>当前总战力</span><strong>${powerText}</strong></p></button>`;
+      }).join("");
+    } catch (e) { console.warn("[paintChoices] teamChoices 渲染异常:", e.message); }
+    try {
+      const battleStats = (data && data.battleStats) || battles.map(([name]) => ({
+        battle: name, rows: [], leader: { team: "暂无", sprint: 0, guard: 0, power: 0 },
+        second: { team: "暂无", power: 0 }, gap: 0, tag: "🔥 激烈争夺中",
+      }));
+      $("#battleChoices").innerHTML = battleStats.map((stat) => battleCard(stat)).join("");
+    } catch (e) { console.warn("[paintChoices] battleChoices 渲染异常:", e.message); }
+    try { selectValue($("#teamChoices"), state.profile.team); } catch (e) {}
+    try { selectValue($("#battleChoices"), state.profile.battle); } catch (e) {}
+    try { selectValue($("#tacticChoices"), state.profile.tactic); } catch (e) {}
     const nameEl = $("#playerName"); if (nameEl) nameEl.value = state.profile.name || nameEl.value || "";
-    updateTeamCallout();
+    try { updateTeamCallout(); } catch (e) {}
   }
 
   function battleCard(stat) {
@@ -534,9 +541,12 @@
     }));
     const todayHighlights = (data && data.todayHighlights) || { mvp: null, bestAttack: null, bestDefend: null, comboKing: null };
     const ticker = (data && data.ticker) || [];
-    $("#championStrip").innerHTML = champion && champion.power > 0 ? `<div>${teamAvatar(teamMeta.get(champion.team))}<span>当前排名第一战队</span><strong>👑 ${champion.team}</strong><span>占领战场：${champion.occupied}/5｜总战力：${champion.power}</span></div><b>${champion.occupied}/5</b>` : `<div><span>当前排名第一战队</span><strong>等待开球</strong><span>完成挑战后，冠军席位将实时刷新。</span></div><b>0/5</b>`;
-    $("#teamBoard").innerHTML = teamStats.some((team) => team.power > 0) ? teamStats.map((team, index) => teamRow(team, index)).join("") : empty("暂无门店战力，先完成一局挑战。");
-    $("#battleBoard").innerHTML = battleStats.map((stat) => reportBattleCard(stat)).join(""); $("#playerBoard").innerHTML = renderHighlights(todayHighlights); $("#liveTicker").innerHTML = renderTicker(ticker, teamStats);
+    console.log("[paintReports] data来源:", data ? "Supabase实时" : "占位", "| champion:", champion?.team, champion?.power, "| teams:", teamStats.length, "队, power>0:", teamStats.filter(t => t.power > 0).map(t => `${t.team}:${t.power}`).join(", ") || "无", "| battles:", battleStats.length);
+    try { $("#championStrip").innerHTML = champion && champion.power > 0 ? `<div>${teamAvatar(teamMeta.get(champion.team))}<span>当前排名第一战队</span><strong>👑 ${champion.team}</strong><span>占领战场：${champion.occupied}/5｜总战力：${champion.power}</span></div><b>${champion.occupied}/5</b>` : `<div><span>当前排名第一战队</span><strong>等待开球</strong><span>完成挑战后，冠军席位将实时刷新。</span></div><b>0/5</b>`; } catch (e) { console.warn("[paintReports] championStrip 渲染异常:", e.message); }
+    try { $("#teamBoard").innerHTML = teamStats.some((team) => team.power > 0) ? teamStats.map((team, index) => teamRow(team, index)).join("") : empty("暂无门店战力，先完成一局挑战。"); } catch (e) { console.warn("[paintReports] teamBoard 渲染异常:", e.message); $("#teamBoard").innerHTML = empty("数据加载异常，请刷新重试。"); }
+    try { $("#battleBoard").innerHTML = battleStats.map((stat) => reportBattleCard(stat)).join(""); } catch (e) { console.warn("[paintReports] battleBoard 渲染异常:", e.message); }
+    try { $("#playerBoard").innerHTML = renderHighlights(todayHighlights); } catch (e) { console.warn("[paintReports] playerBoard 渲染异常:", e.message); }
+    try { $("#liveTicker").innerHTML = renderTicker(ticker, teamStats); } catch (e) { console.warn("[paintReports] liveTicker 渲染异常:", e.message); }
   }
 
   function teamRow(team, index) { const icon = index === 0 ? "👑" : index === 1 ? "⚔" : index === 2 ? "🛡" : index + 1; const status = index === 0 ? "暂居王座" : index === 1 ? "强势追击" : index === 2 ? "蓄势反超" : "等待爆发"; return `<article class="rank-row ${index === 0 ? "top-1" : ""}">${teamAvatar(teamMeta.get(team.team))}<span class="rank">${icon}</span><div><h4>第${index + 1}名：${team.team}</h4><p>占领 ${team.occupied} 个战场｜参与 ${team.participants} 人｜状态：${status}</p></div><strong>${team.power}</strong></article>`; }
