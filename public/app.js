@@ -12,14 +12,39 @@
 
   // ============ Supabase 客户端初始化 ============
   let supabase = null;
+  let supabaseStatus = "unknown"; // unknown | ok | failed
   function initSupabase() {
     try {
       if (window.supabase && CFG.supabaseUrl && CFG.supabaseAnonKey) {
         supabase = window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
-        console.log("[supabase] 客户端已初始化");
+        console.log("[supabase] 客户端已初始化 | URL:", CFG.supabaseUrl, "| Key前缀:", CFG.supabaseAnonKey.slice(0, 12) + "...");
       }
     } catch (e) {
-      console.warn("[supabase] 初始化失败:", e);
+      console.warn("[supabase] 初始化失败:", e.message);
+      supabaseStatus = "failed";
+    }
+  }
+
+  // 网络诊断：检测是否能连通 Supabase
+  async function diagnoseNetwork() {
+    if (!supabase) { supabaseStatus = "failed"; return false; }
+    const start = Date.now();
+    try {
+      const res = await sbQuery(() => supabase.from("chongguan_meta").select("key").limit(1));
+      const elapsed = Date.now() - start;
+      if (res && !res.error) {
+        supabaseStatus = "ok";
+        console.log("[diagnose] ✅ Supabase 连通正常 (" + elapsed + "ms)");
+        return true;
+      } else {
+        supabaseStatus = "failed";
+        console.warn("[diagnose] ❌ Supabase 查询失败:", res?.error?.message || "未知错误", "(" + elapsed + "ms)");
+        return false;
+      }
+    } catch (e) {
+      supabaseStatus = "failed";
+      console.warn("[diagnose] ❌ Supabase 网络异常:", e.message, "(" + (Date.now() - start) + "ms)");
+      return false;
     }
   }
 
@@ -145,19 +170,45 @@
 
   // ============ Supabase 直连查询 ============
 
+  // Supabase 查询包装（带超时和详细错误日志）
   async function sbQuery(fn) {
-    if (!supabase) return null;
-    try { return await fn(); } catch (e) { console.warn("[supabase]", e.message); return null; }
+    if (!supabase) { console.warn("[sbQuery] supabase 客户端未初始化"); return null; }
+    try {
+      const result = await Promise.race([
+        fn(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("查询超时(10s)")), 10000))
+      ]);
+      return result;
+    } catch (e) {
+      const msg = e.message || String(e);
+      // 分类错误类型，给出针对性建议
+      if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("ERR_CONNECTION")) {
+        console.warn("[sbQuery] ❌ 网络不可达:", msg, "| 请检查：1)是否能打开 https://supabase.co  2)公司防火墙是否拦截  3)是否需要开启VPN/代理");
+      } else if (msg.includes("401") || msg.includes("403") || msg.includes("Unauthorized") || msg.includes("invalid api key")) {
+        console.warn("[sbQuery] ❌ 认证失败:", msg, "| 建议检查 config.js 中的 supabaseAnonKey 是否正确（需使用 anon key，非 service_role 或 publishable 格式）");
+      } else if (msg.includes("超时")) {
+        console.warn("[sbQuery] ⏰", msg);
+      } else {
+        console.warn("[sbQuery] ❌ 查询异常:", msg);
+      }
+      return null;
+    }
   }
 
   // 从 Supabase 聚合榜单（替代原来的 GET /leaderboard）
   async function sbAggregate() {
+    console.log("[sbAggregate] 开始查询 Supabase...");
+    const t0 = Date.now();
     const [teamRes, battleRes] = await Promise.all([
       sbQuery(() => supabase.from("chongguan_team_stats").select("*")),
       sbQuery(() => supabase.from("chongguan_battle_stats").select("*")),
     ]);
-    if (!teamRes || !battleRes || teamRes.error || battleRes.error) { console.warn("[sbAggregate] 查询失败: teamRes=", teamRes?.error?.message || "null", "battleRes=", battleRes?.error?.message || "null"); return null; }
-    console.log("[sbAggregate] teamStats 行数:", (teamRes.data || []).length, "| battleStats 行数:", (battleRes.data || []).length);
+    const elapsed = Date.now() - t0;
+    console.log("[sbAggregate] 查询耗时:", elapsed + "ms", "| teamRes:", teamRes ? (teamRes.error ? "error:"+teamRes.error.message : "ok("+((teamRes.data||[]).length)+"行)") : "null", "| battleRes:", battleRes ? (battleRes.error ? "error:"+battleRes.error.message : "ok("+((battleRes.data||[]).length)+"行)") : "null");
+    if (!teamRes || !battleRes || teamRes.error || battleRes.error) {
+      console.warn("[sbAggregate] ❌ 查询失败，返回 null | teamError:", teamRes?.error?.message || (teamRes ? "无" : "请求未返回"), "| battleError:", battleRes?.error?.message || (battleRes ? "无" : "请求未返回"));
+      return null;
+    }
 
     const teamStats = (teamRes.data || []).map((t) => ({ team: t.team, occupied: 0, participants: t.participants || 0, power: t.power || 0, high: t.high || 0 }));
 
@@ -246,11 +297,36 @@
     return { success: true, data: { todayAttempts: finalCount, todayBest: bestRes?.data?.score || record.score } };
   }
 
-  // ============ 统一数据入口（优先 Supabase，降级 Mock）============
+  // ============ 网络状态提示 ============
+  function showNetworkTip() {
+    const tip = document.createElement("div");
+    tip.id = "networkTip";
+    tip.style.cssText = "position:fixed;top:0;left:0;right:0;background:#ff6b35;color:#fff;padding:8px 16px;font-size:13px;text-align:center;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,0.3);";
+    tip.innerHTML = "🌐 当前为<strong>离线模式</strong> — 数据仅存于本机浏览器，刷新后模拟数据重置。<br><small style='opacity:0.8'>如需联网同步，请检查网络或联系技术支持</small>";
+    document.body.appendChild(tip);
+    // 10秒后自动淡出
+    setTimeout(() => { tip.style.transition = "opacity 1s"; tip.style.opacity = "0"; setTimeout(() => tip.remove(), 1000); }, 10000);
+  }
 
+  // 带重试的 aggregate（自动重试1次，间隔2秒）
+  let _aggregateRetry = false;
   async function aggregate() {
     if (USE_MOCK) return mockLeaderboard();
-    const data = await sbAggregate();
+    let data = await sbAggregate();
+    if (!data && !_aggregateRetry) {
+      console.warn("[aggregate] 首次查询失败，2秒后自动重试...");
+      _aggregateRetry = true;
+      await new Promise((r) => setTimeout(r, 2000));
+      data = await sbAggregate();
+      if (!data) {
+        console.warn("[aggregate] 重试也失败，确认 Supabase 不可达");
+        // 自动降级到离线模式
+        USE_MOCK = true;
+        showNetworkTip();
+        return mockLeaderboard();
+      }
+    }
+    _aggregateRetry = false;
     console.log("[aggregate] sbAggregate 返回:", data ? "有数据" : "null/失败", "| champion:", data?.champion?.team, data?.champion?.power, "| teamStats:", data?.teamStats?.length, "| battleStats:", data?.battleStats?.length);
     if (!data) {
       return {
@@ -295,18 +371,23 @@
 
   async function loadConfig() {
     initSupabase();
-    // 测试 Supabase 连通性
+    // 测试 Supabase 连通性（带超时和详细诊断）
     if (supabase) {
-      const testRes = await sbQuery(() => supabase.from("chongguan_meta").select("key").limit(1));
-      if (testRes && !testRes.error) {
-        console.log("[config] Supabase 连接正常，使用在线模式");
+      const ok = await Promise.race([
+        diagnoseNetwork(),
+        new Promise((resolve) => setTimeout(() => { console.warn("[config] ⏰ 连接测试超时(8s)，切换到离线模式"); resolve(false); }, 8000))
+      ]);
+      if (ok) {
+        console.log("[config] ✅ Supabase 连接正常，使用在线模式");
         USE_MOCK = false;
       } else {
-        console.warn("[config] Supabase 连接失败，切换到离线模式");
+        console.warn("[config] ❌ Supabase 无法连接，切换到离线模式（数据仅存于本地浏览器）");
+        console.warn("[config] 💡 可能原因：1)公司网络限制  2)防火墙拦截supabase.co  3)DNS解析失败");
         USE_MOCK = true;
+        showNetworkTip();
       }
     } else {
-      console.warn("[config] 未配置 Supabase，使用离线模式");
+      console.warn("[config] ⚠️ 未配置 Supabase，使用离线模式");
       USE_MOCK = true;
     }
     // 加载战队/战场数据（始终从内置数据读取，保证一致性）
