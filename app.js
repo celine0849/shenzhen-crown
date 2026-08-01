@@ -16,7 +16,7 @@
   const TCB_ENV = CFG.cloudbaseEnv;
   let tcbStatus = "unknown"; // unknown | ok | failed
 
-  // 加载 CloudBase Web SDK（本地文件优先，CDN 兜底）
+  // 加载 CloudBase Web SDK（本地文件，随 GitHub Pages 一起部署，大陆原生可达，无需任何外部 CDN）
   function loadScript(src) {
     return new Promise((resolve, reject) => {
       const s = document.createElement("script");
@@ -25,22 +25,13 @@
     });
   }
   async function ensureCloudbaseSDK() {
-    if (window.cloudbase || window.tcb) return true;
-    // 优先从本地 assets/ 加载（随 GitHub Pages 一起部署，100% 可用）
-    const cdns = [
-      "assets/tcb.min.js",
-      "https://cdn.bootcdn.net/ajax/libs/tcb-js-sdk/1.10.10/index.js",
-      "https://unpkg.com/tcb-js-sdk@1.10.10/dist/index.js",
-    ];
-    for (const cdn of cdns) {
-      try {
-        await loadScript(cdn);
-        // tcb-js-sdk 暴露 window.tcb，统一映射为 window.cloudbase
-        if (window.tcb && !window.cloudbase) { window.cloudbase = window.tcb; }
-        if (window.cloudbase) { console.log("[tcb] ✅ SDK 加载成功 (" + cdn + ")"); return true; }
-      } catch (e) { console.warn("[tcb] ❌ 加载失败:", cdn); }
-    }
-    console.error("[tcb] 💥 所有来源均失败，CloudBase 不可用");
+    if (window.cloudbase) return true;
+    // 仅加载本地打包文件（assets/tcb.min.js = @cloudbase/js-sdk v3 浏览器版）
+    try {
+      await loadScript("assets/tcb.min.js");
+      if (window.cloudbase) { console.log("[tcb] ✅ SDK 加载成功 (本地 assets/tcb.min.js)"); return true; }
+    } catch (e) { console.warn("[tcb] ❌ 本地 SDK 加载失败:", e.message); }
+    console.error("[tcb] 💥 本地 SDK 加载失败，CloudBase 不可用");
     return false;
   }
 
